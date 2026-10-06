@@ -88,6 +88,13 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .conn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
 .conn-dot.on{background:var(--green)}.conn-dot.off{background:var(--red)}
 .tsi.winsel{border-color:var(--green)!important;box-shadow:0 0 0 2px var(--green),0 0 10px rgba(34,197,94,.5)}
+.tsi.elig{border-color:var(--gold);box-shadow:0 0 8px rgba(201,160,51,.45)}
+.potlist{display:flex;flex-direction:column;gap:3px;width:100%;margin-bottom:6px;max-height:34vh;overflow-y:auto}
+.potrow{display:flex;justify-content:space-between;gap:8px;font-size:.74rem;padding:5px 9px;border-radius:7px;background:var(--s2);color:var(--dim)}
+.potrow.cur{background:var(--gold-dim);color:var(--bright);border:1px solid var(--gold)}
+.potrow.done{opacity:.55}
+.potnm b{color:var(--gold)}
+.potelig{color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
 .settle{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .settle-h{font-size:.8rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;text-align:center}
 .settle-row{display:flex;justify-content:space-between;align-items:center;font-size:.9rem;color:var(--text);gap:10px}
@@ -642,7 +649,7 @@ function rGame(app){
     let badge='';if(h&&!isWait){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
     seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
+      <div class="tsi ${isSD?'ck elig':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
@@ -673,10 +680,17 @@ function rActionPanel(h,me,isH,pl){
       return`<div class="hp"><div class="hm">Betting complete</div><div class="ab"><button class="btn-g" onclick="advanceRound()">${lb}</button></div></div>`}
     if(h.status==='showdown'){
       const pots=h.pots||[],p=pots[h.potIdx],sel=(h.sel||[]).length;
-      if(!p)return`<div class="hp"><div class="hm">Resolving…</div></div>`;
-      const title=pots.length>1?`Pot ${h.potIdx+1}/${pots.length}: ${p.amount} chips`:`Pot: ${p.amount} chips`;
-      return`<div class="hp"><div class="hm">${title} — tap the winner(s), then Award. Tap 2+ to split/chop.</div>
-        <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award — split ${sel} ways`:'Award pot'}</button></div></div>`;
+      const rows=pots.map((pt,i)=>{
+        const nm=pots.length===1?'Pot':(i===0?'Main pot':'Side pot '+i);
+        const elig=pt.eligible.map(s=>{const pw=playerBySeat(s);return pw?esc(pw.name):'S'+s}).join(', ');
+        const won=pt.winner?('✓ '+(Array.isArray(pt.winner)?pt.winner.map(id=>esc(G.players[id]?.name||'?')).join(' & '):esc(G.players[pt.winner]?.name||'?'))):'';
+        const st=pt.winner?'done':(i===h.potIdx?'cur':'');
+        return`<div class="potrow ${st}"><span class="potnm">${nm} <b>${pt.amount}</b></span><span class="potelig">${won||'elig: '+elig}</span></div>`;
+      }).join('');
+      const cur=pots.length===1?'the pot':(h.potIdx===0?'the MAIN pot':'SIDE POT '+h.potIdx);
+      return`<div class="hp"><div class="potlist">${rows}</div>
+        ${p?`<div class="hm">Tap the winner(s) of <b>${cur}</b> (gold-ringed seats), then Award. Tap 2+ to split.</div>
+        <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award ${cur} — split ${sel} ways`:'Award '+cur}</button></div>`:`<div class="hm">All pots awarded ✓</div>`}</div>`;
     }
   }
   if(me&&h&&h.satOut&&h.satOut.includes(me.seat))return`<div class="hm">You joined mid-hand — you’ll be dealt in on the next hand.</div>`;
