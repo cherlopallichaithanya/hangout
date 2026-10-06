@@ -286,7 +286,7 @@ function processBet(playerId,action,raiseAmt){
     const add=raiseAmt-myBet;
     if(add>me.chips)return;
     me.chips-=add;h.bets[me.seat]=raiseAmt;
-    h.currentBet=raiseAmt;h.lastRaise=raiseAmt-h.currentBet||G.config.bigBlind;
+    h.lastRaise=(raiseAmt-h.currentBet)||G.config.bigBlind;h.currentBet=raiseAmt;
     h.acted=[];
     if(me.chips===0)h.allIn.push(me.seat);
     h.lastAction=me.name+' raised to '+raiseAmt;
