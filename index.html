@@ -273,8 +273,9 @@ function nextSeat(from,pl){const ss=pl.map(p=>p.seat).sort((a,b)=>a-b);if(!ss.le
 function blindSeats(ds,pl){if(pl.length===2)return{sb:ds,bb:nextSeat(ds,pl)};const sb=nextSeat(ds,pl);return{sb,bb:nextSeat(sb,pl)}}
 
 function dealHand(){
-  const pl=activePlayers();
-  if(pl.length<2){toast('Need 2+ players');return}
+  const pl=activePlayers().filter(p=>p.chips>0);   // only funded players are dealt in
+  if(pl.length<2){toast('Need 2+ funded players');return}
+  const busted=activePlayers().filter(p=>p.chips<=0).map(p=>p.seat);  // computed BEFORE blinds; seated-but-broke sit out
   const lastD=G.hand?.dealerSeat||0,ds=nextSeat(lastD,pl),bl=blindSeats(ds,pl);
   const hn=(G.hand?.handNum||0)+1;
   const sbP=playerBySeat(bl.sb,pl),bbP=playerBySeat(bl.bb,pl);
@@ -282,9 +283,15 @@ function dealHand(){
   const sbA=Math.min(G.config.smallBlind,sbP.chips),bbA=Math.min(G.config.bigBlind,bbP.chips);
   sbP.chips-=sbA;bbP.chips-=bbA;
   const bets={};bets[bl.sb]=sbA;bets[bl.bb]=bbA;
-  G.hand={handNum:hn,dealerSeat:ds,sbSeat:bl.sb,bbSeat:bl.bb,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,folded:[],allIn:[],acted:[],currentSeat:nextSeat(bl.bb,pl),status:'betting',lastAction:'Blinds posted',winner:null};
+  const contrib={};contrib[bl.sb]=sbA;contrib[bl.bb]=bbA;   // per-seat total committed this hand (for side pots)
+  const allIn=[];if(sbP.chips===0)allIn.push(bl.sb);if(bbP.chips===0)allIn.push(bl.bb);
+  // First to act = first funded, non-all-in player after the big blind (skip blind-all-ins).
+  const canAct=pl.filter(p=>!allIn.includes(p.seat));
+  const first=canAct.length?nextSeat(bl.bb,canAct):null;
+  G.hand={handNum:hn,dealerSeat:ds,sbSeat:bl.sb,bbSeat:bl.bb,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,contrib,folded:busted,allIn,acted:[],currentSeat:first,status:'betting',lastAction:'Blinds posted',winner:null,pots:null,potIdx:0};
   toast('Hand #'+hn+' dealt');
-  broadcast();
+  if(first==null)advanceRound();   // everyone all-in from blinds → no betting, run to showdown
+  else broadcast();
 }
 
 function processBet(playerId,action,raiseAmt){
@@ -292,30 +299,38 @@ function processBet(playerId,action,raiseAmt){
   if(!h||!me||h.status!=='betting')return;
   if(h.currentSeat!==me.seat)return;
   const pl=activePlayers(),myBet=(h.bets||{})[me.seat]||0;
+  if(!h.contrib)h.contrib={};
 
   if(action==='fold'){
     h.folded.push(me.seat);h.lastAction=me.name+' folded';
   }else if(action==='check'){
-    if(myBet<h.currentBet)return;
+    if(myBet<h.currentBet)return;                         // can't check facing a bet
     h.lastAction=me.name+' checked';
   }else if(action==='call'){
     const amt=Math.min(h.currentBet-myBet,me.chips);
-    me.chips-=amt;h.bets[me.seat]=myBet+amt;
-    if(me.chips===0)h.allIn.push(me.seat);
+    if(amt<=0)return;                                     // nothing to call
+    me.chips-=amt;h.bets[me.seat]=myBet+amt;h.contrib[me.seat]=(h.contrib[me.seat]||0)+amt;
+    if(me.chips===0&&!h.allIn.includes(me.seat))h.allIn.push(me.seat);
     h.lastAction=me.name+' called '+amt;
   }else if(action==='raise'){
     const add=raiseAmt-myBet;
-    if(add>me.chips)return;
-    me.chips-=add;h.bets[me.seat]=raiseAmt;
-    h.lastRaise=(raiseAmt-h.currentBet)||G.config.bigBlind;h.currentBet=raiseAmt;
-    h.acted=[];
-    if(me.chips===0)h.allIn.push(me.seat);
+    if(add<=0||add>me.chips)return;                       // must add chips, bounded by stack
+    if(raiseAmt<=h.currentBet)return;                     // a raise must exceed the current bet
+    const minTo=h.currentBet+(h.lastRaise||G.config.bigBlind),isAllIn=add===me.chips;
+    if(raiseAmt<minTo&&!isAllIn)return;                   // must meet the min-raise unless going all-in
+    me.chips-=add;h.bets[me.seat]=raiseAmt;h.contrib[me.seat]=(h.contrib[me.seat]||0)+add;
+    const inc=raiseAmt-h.currentBet;
+    if(inc>=(h.lastRaise||G.config.bigBlind))h.lastRaise=inc;  // only a full raise raises the min-raise bar
+    h.currentBet=raiseAmt;h.acted=[];                     // reopen the action
+    if(me.chips===0&&!h.allIn.includes(me.seat))h.allIn.push(me.seat);
     h.lastAction=me.name+' raised to '+raiseAmt;
   }else if(action==='allin'){
+    if(me.chips<=0)return;
     const total=myBet+me.chips;
-    if(total>h.currentBet){h.lastRaise=total-h.currentBet;h.currentBet=total;h.acted=[]}
+    h.contrib[me.seat]=(h.contrib[me.seat]||0)+me.chips;
+    if(total>h.currentBet){const inc=total-h.currentBet;if(inc>=(h.lastRaise||G.config.bigBlind))h.lastRaise=inc;h.currentBet=total;h.acted=[]}
     h.bets[me.seat]=total;h.lastAction=me.name+' all-in '+me.chips;
-    me.chips=0;h.allIn.push(me.seat);
+    me.chips=0;if(!h.allIn.includes(me.seat))h.allIn.push(me.seat);
   }else return;
 
   if(!h.acted.includes(me.seat))h.acted.push(me.seat);
@@ -346,7 +361,7 @@ function advanceRound(){
   while(true){
     const ri=ROUNDS.indexOf(h.round),nr=ROUNDS[ri+1];
     if(!nr)return;
-    if(nr==='showdown'){h.round='showdown';h.status='showdown';h.lastAction='Showdown — host taps the winner';broadcast();return}
+    if(nr==='showdown'){h.round='showdown';h.status='showdown';h.pots=computePots(h);h.potIdx=0;resolveAutoPots(h);if(h.status==='showdown')h.lastAction='Showdown — host taps the winner';broadcast();return}
     const canBet=activePlayers().filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
     h.round=nr;h.currentBet=0;h.lastRaise=G.config.bigBlind;h.lastAction=RL[nr];
     if(canBet.length>=2){h.currentSeat=nextSeat(h.dealerSeat,canBet);h.status='betting';broadcast();return}
@@ -354,12 +369,56 @@ function advanceRound(){
   }
 }
 
+// Split the hand's contributions into main + side pots. Each pot lists the SEATS eligible to win it
+// (players who didn't fold and contributed at that level). Chips from folded players roll into the pots.
+function computePots(h){
+  const contrib=Object.assign({},h.contrib||{}),folded=h.folded||[];
+  const allNonFolded=Object.keys(contrib).map(Number).filter(s=>contrib[s]>0&&!folded.includes(s));
+  const remaining={};Object.keys(contrib).forEach(s=>{if(contrib[s]>0)remaining[+s]=contrib[s]});
+  const pots=[];
+  while(true){
+    const active=Object.keys(remaining).map(Number).filter(s=>remaining[s]>0);
+    if(!active.length)break;
+    const minAmt=Math.min.apply(null,active.map(s=>remaining[s]));
+    const amount=minAmt*active.length;
+    let eligible=active.filter(s=>!folded.includes(s));
+    if(!eligible.length)eligible=allNonFolded.slice();        // folded-only layer → remaining contenders win it
+    active.forEach(s=>remaining[s]-=minAmt);
+    if(amount<=0)continue;
+    const key=eligible.slice().sort((a,b)=>a-b).join(',');
+    const prev=pots[pots.length-1];
+    if(prev&&prev.key===key)prev.amount+=amount;             // merge adjacent layers with the same contenders
+    else pots.push({amount,eligible,key,winner:null});
+  }
+  return pots;
+}
+// Auto-award any pot with a single eligible player; stop at the first that needs a human decision.
+function resolveAutoPots(h){
+  if(!h.pots)return;
+  while(h.potIdx<h.pots.length){
+    const p=h.pots[h.potIdx];
+    if(p.winner){h.potIdx++;continue}
+    if(p.eligible.length===1){
+      const pw=Object.values(G.players).find(x=>x.seat===p.eligible[0]);
+      if(pw){pw.chips+=p.amount;p.winner=pw.id;h.winner=pw.id;}
+      h.potIdx++;
+    }else break;
+  }
+  if(h.potIdx>=h.pots.length)h.status='complete';
+}
 function selectWinner(pid){
-  const h=G.hand;if(!h)return;
-  const pot=h.pot+Object.values(h.bets||{}).reduce((s,v)=>s+v,0);
+  const h=G.hand;if(!h||h.status!=='showdown')return;
   const w=G.players[pid];if(!w)return;
-  w.chips+=pot;h.status='complete';h.winner=pid;h.pot=pot;h.bets={};h.lastAction=w.name+' wins '+pot;
-  toast(h.lastAction);broadcast();
+  if(!h.pots||!h.pots.length){                               // safety fallback: one undivided pot
+    w.chips+=h.pot;h.status='complete';h.winner=pid;h.lastAction=w.name+' wins '+h.pot;toast(h.lastAction);broadcast();return;
+  }
+  const pot=h.pots[h.potIdx];if(!pot)return;
+  if(!pot.eligible.includes(w.seat)){toast(w.name+' can’t win this pot (wasn’t in it)');return}
+  w.chips+=pot.amount;pot.winner=pid;h.winner=pid;
+  h.lastAction=w.name+' wins '+pot.amount+(h.pots.length>1?' (pot '+(h.potIdx+1)+'/'+h.pots.length+')':'');
+  toast(h.lastAction);
+  h.potIdx++;resolveAutoPots(h);
+  broadcast();
 }
 
 function drawCards(){
@@ -489,7 +548,8 @@ function rGame(app){
   for(let i=0;i<SEATS.length;i++){
     const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
     if(!occ){seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi"><span class="sn">S${sn}</span><span class="sempty">—</span></div></div>`;continue}
-    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&!isFold;
+    const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
+    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold);
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
     let badge='';if(h){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
@@ -523,7 +583,11 @@ function rActionPanel(h,me,isH,pl){
     }
     if(h.status==='roundComplete'){const ri=ROUNDS.indexOf(h.round),nx=ROUNDS[ri+1],lb=nx==='showdown'?'Go to Showdown':'Deal '+RL[nx];
       return`<div class="hp"><div class="hm">Betting complete</div><div class="ab"><button class="btn-g" onclick="advanceRound()">${lb}</button></div></div>`}
-    if(h.status==='showdown')return`<div class="hp"><div class="hm">Tap the winner's seat above</div></div>`;
+    if(h.status==='showdown'){
+      const pots=h.pots||[],p=pots[h.potIdx];
+      const label=p?(pots.length>1?`Side pots — Pot ${h.potIdx+1}/${pots.length}: ${p.amount} chips. Tap the winner (highlighted seats only)`:`Tap the winner's seat above (${p.amount} chips)`):'Tap the winner\'s seat above';
+      return`<div class="hp"><div class="hm">${label}</div></div>`;
+    }
   }
   if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
     const mb=(h.bets||{})[me.seat]||0,tc=h.currentBet-mb,cc=tc===0,mn=h.currentBet+(h.lastRaise||G.config.bigBlind),mx=mb+me.chips;
@@ -533,7 +597,7 @@ function rActionPanel(h,me,isH,pl){
       ${mx>=mn?`<div class="rr"><input type="range" id="rsl" min="${mn}" max="${mx}" value="${mn}" step="${G.config.bigBlind}"><input type="number" id="ramt" value="${mn}" min="${mn}" max="${mx}"><button class="btn-g btn-sm" onclick="doBet('raise',+document.getElementById('ramt').value)">Raise</button></div>`:''}`
   }
   if(h?.status==='betting'){const cp=playerBySeat(h.currentSeat);return`<div class="hm">Waiting for ${cp?esc(cp.name):'next player'}…</div>`}
-  if(!isH&&h?.status==='showdown')return`<div class="hm">Showdown — host picks the winner</div>`;
+  if(!isH&&h?.status==='showdown'){const pots=h.pots||[];return`<div class="hm">Showdown — host is awarding ${pots.length>1?`pot ${(h.potIdx||0)+1}/${pots.length}`:'the pot'}…</div>`}
   if(!isH&&(!h||h.status==='complete'))return`<div class="hm">Waiting for host to deal…</div>`;
   return'';
 }
