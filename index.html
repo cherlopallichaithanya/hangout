@@ -101,6 +101,15 @@ const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50-48*Math.cos
 
 // ===== STATE =====
 let peer=null, conns=[], hostConn=null;
+// Shared PeerJS options: STUN for NAT discovery + free public TURN relays so
+// players on different networks (e.g. cellular vs. host's WiFi) can still connect.
+const PEER_OPTS={debug:0,config:{iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
+]}};
 let G={
   screen:'home',roomId:null,myId:null,myName:'',isHost:false,
   config:null,players:{},hand:null,cardDraw:null,
@@ -158,7 +167,10 @@ function createHost(config){
   G.hand=null;
   G.cardDraw=null;
 
-  peer=new Peer('PKRN_'+G.roomId,{debug:0});
+  peer=new Peer('PKRN_'+G.roomId,PEER_OPTS);
+  // If the signaling socket drops (e.g. host's phone backgrounds the tab),
+  // re-register the same room ID so friends can still find the room.
+  peer.on('disconnected',()=>{toast('Reconnecting room…');try{peer.reconnect()}catch(e){}});
   peer.on('open',()=>{
     toast('Room '+G.roomId+' created!');
     // Host auto-sits seat 1
@@ -188,12 +200,13 @@ function joinRoom(code){
   G.roomId=code.toUpperCase();
   G.isHost=false;
   G.myId=null;
-  peer=new Peer(undefined,{debug:0});
-  peer.on('open',id=>{
-    G.myId=id;
-    hostConn=peer.connect('PKRN_'+G.roomId,{reliable:true});
-    hostConn.on('open',()=>{toast('Connected to room '+G.roomId)});
-    hostConn.on('data',d=>{
+  let tries=0,maxTries=10,connected=false;
+  peer=new Peer(undefined,PEER_OPTS);
+
+  function wireConn(c){
+    hostConn=c;let opened=false;
+    c.on('open',()=>{opened=true;connected=true;toast('Connected to room '+G.roomId)});
+    c.on('data',d=>{
       if(d.type==='state'){
         G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
         // Update screen based on status
@@ -203,12 +216,25 @@ function joinRoom(code){
         render();
       }
     });
-    hostConn.on('close',()=>{toast('Disconnected from host');});
-    hostConn.on('error',e=>{toast('Connection error');console.error(e)});
-  });
+    // Only retry on a drop that happened after we were actually connected.
+    c.on('close',()=>{if(opened){connected=false;toast('Lost host — reconnecting…');setTimeout(tryConnect,1500)}});
+    c.on('error',e=>{console.error(e)});
+  }
+  function tryConnect(){
+    if(connected||!peer||peer.destroyed||peer.disconnected)return;
+    tries++;
+    wireConn(peer.connect('PKRN_'+G.roomId,{reliable:true}));
+  }
+
+  peer.on('open',id=>{G.myId=id;tryConnect()});
+  // Re-register our own peer if the signaling socket drops, then retry the host.
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
   peer.on('error',e=>{
-    if(e.type==='peer-unavailable'){toast('Room not found');G.screen='home';render();}
-    else{toast('Error: '+e.type)}
+    if(e.type==='peer-unavailable'){
+      // Host may still be registering, or briefly offline — keep trying before giving up.
+      if(tries<maxTries){toast('Looking for room… ('+tries+'/'+maxTries+')');setTimeout(tryConnect,1500)}
+      else{toast('Room not found — check the code and that the host’s tab is open');G.screen='home';render()}
+    }else{toast('Error: '+e.type);console.error(e)}
   });
   G.screen='lobby';
   render();
