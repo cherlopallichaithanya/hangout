@@ -112,6 +112,7 @@ const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50-48*Math.cos
 // ===== STATE =====
 let client=null;        // MQTT connection to the public broker
 let joinTimer=null;     // watchdog: if no room state arrives, the room isn't there
+let undoStack=[];       // host-only: state snapshots for multi-level undo
 // Free public MQTT broker over secure WebSocket — no account, works on any network/phone/browser.
 const BROKER='wss://broker.emqx.io:8084/mqtt';
 const TOPIC_NS='hangout/v1';                   // namespace so we don't clash with other broker users
@@ -171,11 +172,13 @@ function handlePlayerMsg(data,connId){
     if(data.seat&&data.name){
       const taken=Object.values(G.players).some(p=>p.seat===data.seat&&p.id!==connId);
       if(taken)return;
+      pushUndo();
       G.players[connId]={id:connId,name:data.name,seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
       toast(data.name+' sat at seat '+data.seat);
       broadcast();
     }
   }else if(data.type==='leave'){
+    pushUndo();
     delete G.players[connId];
     toast('Player left');
     broadcast();
@@ -191,6 +194,7 @@ function processRebuy(playerId,chips){
   const p=G.players[playerId];if(!p)return;
   if(G.hand&&G.hand.status!=='complete'){toast('Re-buy only between hands');return}
   if(p.chips>=50){toast('Re-buy only when under 50 chips');return}
+  pushUndo();
   const amt=chips===200?200:100;   // only 100 or 200 allowed
   p.chips+=amt;p.totalBuyIn+=amt/G.config.chipRatio;
   toast(p.name+' re-bought '+amt+' chips');
@@ -211,8 +215,22 @@ function mqttConnect(onReady){
 function cleanupNet(){
   try{if(client&&client.connected&&G.isHost&&G.roomId)client.publish(topicState(G.roomId),'',{qos:1,retain:true})}catch(e){}
   try{if(client)client.end(true)}catch(e){}
-  client=null;clearTimeout(joinTimer);
+  client=null;clearTimeout(joinTimer);undoStack=[];
 }
+
+// Host-only multi-level undo: snapshot the full game state before each committing action.
+function pushUndo(){
+  if(!G.isHost)return;
+  try{undoStack.push(JSON.stringify({config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,screen:G.screen}));}catch(e){}
+  if(undoStack.length>200)undoStack.shift();
+}
+window.undo=function(){
+  if(!G.isHost)return;
+  if(!undoStack.length){toast('Nothing to undo');return}
+  const snap=JSON.parse(undoStack.pop());
+  G.config=snap.config;G.players=snap.players;G.hand=snap.hand;G.cardDraw=snap.cardDraw;G.screen=snap.screen;
+  toast('Undone ('+undoStack.length+' left)');broadcast();
+};
 
 function createHost(config){
   G.roomId=genCode();
@@ -309,6 +327,7 @@ function blindSeats(ds,pl){if(pl.length===2)return{sb:ds,bb:nextSeat(ds,pl)};con
 function dealHand(){
   const pl=activePlayers().filter(p=>p.chips>0);   // only funded players are dealt in
   if(pl.length<2){toast('Need 2+ funded players');return}
+  pushUndo();
   const busted=activePlayers().filter(p=>p.chips<=0).map(p=>p.seat);  // computed BEFORE blinds; seated-but-broke sit out
   const lastD=G.hand?.dealerSeat||0,ds=nextSeat(lastD,pl),bl=blindSeats(ds,pl);
   const hn=(G.hand?.handNum||0)+1;
@@ -334,6 +353,7 @@ function processBet(playerId,action,raiseAmt){
   if(h.currentSeat!==me.seat)return;
   const pl=activePlayers(),myBet=(h.bets||{})[me.seat]||0;
   if(!h.contrib)h.contrib={};
+  pushUndo();
 
   if(action==='fold'){
     h.folded.push(me.seat);h.lastAction=me.name+' folded';
@@ -454,6 +474,7 @@ function awardCurrentPot(){
   const pot=h.pots[h.potIdx];if(!pot)return;
   const sel=(h.sel||[]).filter(id=>{const p=G.players[id];return p&&pot.eligible.includes(p.seat)});
   if(!sel.length){toast('Tap the winning seat(s) first');return}
+  pushUndo();
   const n=sel.length,base=Math.floor(pot.amount/n);let rem=pot.amount-base*n;
   // Even split; any odd chip(s) go to the earliest seat(s).
   const ordered=sel.slice().sort((a,b)=>G.players[a].seat-G.players[b].seat);
@@ -483,6 +504,7 @@ function computeSettlement(){
 
 function drawCards(){
   const pIds=Object.keys(G.players);if(pIds.length<2){toast('Need 2+ players');return}
+  pushUndo();
   const deck=[];for(const r of RANKS)for(const s of SUITS)deck.push({rank:r,suit:s});
   for(let i=deck.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}
   const draws={};pIds.forEach((id,i)=>{const c=deck[i];draws[id]={rank:c.rank,suit:c.suit,value:cv(c.rank,c.suit)}});
@@ -493,10 +515,10 @@ function drawCards(){
   toast('Cards drawn!');broadcast();
 }
 
-function reshuffleSeats(){G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Reshuffle!');broadcast();setTimeout(()=>drawCards(),500)}
-function startGame(){G.config.status='playing';broadcast()}
-function endGame(){G.config.status='ended';broadcast()}
-function backToLobby(){G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
+function reshuffleSeats(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Reshuffle!');broadcast();setTimeout(()=>drawCards(),500)}
+function startGame(){pushUndo();G.config.status='playing';broadcast()}
+function endGame(){pushUndo();G.config.status='ended';broadcast()}
+function backToLobby(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
 
 // ===== RENDER =====
 function render(){
@@ -594,6 +616,7 @@ function rLobby(app){
       ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Draw for Seats</button>`:''}
       ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
       ${isH&&pc<2?`<p style="color:var(--dim);font-size:.85rem">Need at least 2 players to start</p>`:''}
+      ${isH&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.72rem">↩ Undo</button>`:''}
       ${isH?`<button class="btn-o btn-sm" onclick="doReset()" style="margin-top:6px;font-size:.72rem;color:var(--dim)">⚙ New Table</button>`:''}
     </div>
   </div></div>`;
@@ -618,7 +641,7 @@ function rGame(app){
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
-    <div class="gh"><span class="hn">Room ${G.roomId}</span><span class="hn">${hnd}</span></div>
+    <div class="gh"><span class="hn">Room ${G.roomId}</span>${isH?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.7rem;padding:4px 12px">↩ Undo</button>`:''}<span class="hn">${hnd}</span></div>
     <div class="ptc"><div class="pf"><div class="felt-center">
       <div class="felt-round">${h?RL[h.round]||h.round:'Waiting'}</div>
       <div class="felt-pot">${pot}</div>
@@ -687,11 +710,11 @@ window.showSeatModal=function(sn){
   document.body.appendChild(div);
   const inp=document.getElementById('snin');setTimeout(()=>inp?.focus(),50);
   const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;
-    if(G.isHost){G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};toast(nm+' sat at seat '+sn);broadcast()}
+    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};toast(nm+' sat at seat '+sn);broadcast()}
     else{sendToHost({type:'join',seat:sn,name:nm})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
-window.doLeave=()=>{clearSession();if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
+window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
 // Step 1: pick re-buy amount (100 or 200 chips).
