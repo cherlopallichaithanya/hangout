@@ -32,6 +32,11 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .ptc{position:relative;width:100%;max-width:420px;margin:0 auto;aspect-ratio:8/5}
 .pf{position:absolute;top:18%;left:6%;right:6%;bottom:18%;background:radial-gradient(ellipse at 50% 45%,#2a8a5e,#1a6b43 50%,#145435 100%);border-radius:120px;border:8px solid #8b6914;box-shadow:inset 0 0 30px rgba(0,0,0,.25),0 0 0 4px #6a4f0e,0 0 0 8px #3d2e0a,0 6px 24px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
 .fl{color:rgba(201,160,51,.12);font-size:.8rem;font-weight:700;letter-spacing:.25em;text-transform:uppercase;pointer-events:none;user-select:none}
+.felt-center{display:flex;flex-direction:column;align-items:center;gap:1px;pointer-events:none;user-select:none;text-align:center}
+.felt-round{font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+.felt-pot{font-size:1.7rem;font-weight:800;color:#fff;line-height:1.1;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+.felt-potd{font-size:.72rem;color:rgba(255,255,255,.75);font-weight:600}
+.felt-potl{font-size:.52rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.55)}
 .ts{position:absolute;transform:translate(-50%,-50%);z-index:2}
 .tsi{background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--r);padding:6px 5px;min-width:58px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px}
 .tsi.ck{cursor:pointer}.tsi.ck:active{border-color:var(--gold);background:var(--s2)}
@@ -118,6 +123,17 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
+
+// Stable per-room player id (localStorage) so a reload or manual rejoin resumes the SAME seat.
+function stablePlayerId(room){
+  const k='hangout_pid_'+room;let id=null;
+  try{id=localStorage.getItem(k)}catch(e){}
+  if(!id){id='p_'+Math.random().toString(36).slice(2,10);try{localStorage.setItem(k,id)}catch(e){}}
+  return id;
+}
+// Remember the current room/name for THIS tab only, so a refresh auto-rejoins (but a fresh open doesn't).
+function saveSession(){try{sessionStorage.setItem('hangout_sess',JSON.stringify({room:G.roomId,name:G.myName}))}catch(e){}}
+function clearSession(){try{sessionStorage.removeItem('hangout_sess')}catch(e){}}
 
 // Map the shared game status to the right screen for THIS client (host and players alike).
 function syncScreen(){
@@ -217,7 +233,8 @@ function createHost(config){
 function joinRoom(code){
   G.roomId=code.toUpperCase();
   G.isHost=false;
-  G.myId='p_'+Math.random().toString(36).slice(2,10);
+  G.myId=stablePlayerId(G.roomId);
+  saveSession();
   G.screen='lobby';render();
   client=mqttConnect(c=>{
     c.subscribe(topicState(G.roomId),{qos:1});
@@ -227,7 +244,7 @@ function joinRoom(code){
       if(!G.config){
         if(client&&client.connected)toast('Room not found — check the code and that the host’s tab is open');
         else toast('Can’t reach the game server on this network — try other WiFi or mobile data');
-        G.screen='home';render();
+        clearSession();G.screen='home';render();
       }
     },9000);
   });
@@ -307,22 +324,29 @@ function processBet(playerId,action,raiseAmt){
   }
 
   const canAct=pl.filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
-  if(canAct.every(p=>h.acted.includes(p.seat))&&canAct.length>0){
-    h.status='roundComplete';
+  // Round is done when nobody can act (all remaining are all-in) OR everyone who can act has.
+  if(canAct.length===0||canAct.every(p=>h.acted.includes(p.seat))){
+    advanceRound();   // auto-advance to next street / showdown — no host click needed
   }else{
     h.currentSeat=nextSeat(me.seat,canAct);
+    broadcast();
   }
-  broadcast();
 }
 
 function advanceRound(){
   const h=G.hand;if(!h)return;
-  const ri=ROUNDS.indexOf(h.round),nr=ROUNDS[ri+1];if(!nr)return;
+  // Collect the finished street's bets into the pot.
   h.pot+=Object.values(h.bets||{}).reduce((s,v)=>s+v,0);h.bets={};h.acted=[];
-  if(nr==='showdown'){h.round='showdown';h.status='showdown';h.lastAction='Showdown';broadcast();return}
-  const pl=activePlayers().filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
-  h.round=nr;h.currentBet=0;h.lastRaise=G.config.bigBlind;h.currentSeat=nextSeat(h.dealerSeat,pl);h.status='betting';h.lastAction=RL[nr];
-  broadcast();
+  // Advance streets; skip any street where betting isn't possible (everyone remaining is all-in).
+  while(true){
+    const ri=ROUNDS.indexOf(h.round),nr=ROUNDS[ri+1];
+    if(!nr)return;
+    if(nr==='showdown'){h.round='showdown';h.status='showdown';h.lastAction='Showdown — host taps the winner';broadcast();return}
+    const canBet=activePlayers().filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
+    h.round=nr;h.currentBet=0;h.lastRaise=G.config.bigBlind;h.lastAction=RL[nr];
+    if(canBet.length>=2){h.currentSeat=nextSeat(h.dealerSeat,canBet);h.status='betting';broadcast();return}
+    // <2 players can bet → reveal the next street automatically (loop continues).
+  }
 }
 
 function selectWinner(pid){
@@ -469,9 +493,13 @@ function rGame(app){
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
-    <div class="gh"><span class="rb">${h?RL[h.round]||h.round:'Waiting'}</span><span class="hn">${hnd}</span></div>
-    <div class="pd"><div class="pl">Pot</div><div class="pa">${pot}</div><div class="pdl">$${potD}</div></div>
-    <div class="ptc"><div class="pf"><span class="fl">${G.roomId}</span></div>${seats}</div>
+    <div class="gh"><span class="hn">Room ${G.roomId}</span><span class="hn">${hnd}</span></div>
+    <div class="ptc"><div class="pf"><div class="felt-center">
+      <div class="felt-round">${h?RL[h.round]||h.round:'Waiting'}</div>
+      <div class="felt-pot">${pot}</div>
+      <div class="felt-potd">$${potD}</div>
+      <div class="felt-potl">Pot</div>
+    </div></div>${seats}</div>
     ${h?.lastAction?`<div class="la">${esc(h.lastAction)}</div>`:''}
     ${me?`<div style="text-align:center"><button class="btn-o btn-sm" onclick="doRebuy()">Re-buy ($${G.config.buyInDollars})</button></div>`:''}
   </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
@@ -530,13 +558,20 @@ window.showSeatModal=function(sn){
     else{sendToHost({type:'join',seat:sn,name:nm})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
-window.doLeave=()=>{if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
+window.doLeave=()=>{clearSession();if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=()=>{if(G.isHost){const m=G.players[G.myId];if(m){m.chips+=G.config.buyInDollars*G.config.chipRatio;m.totalBuyIn+=G.config.buyInDollars;toast(m.name+' re-bought');broadcast()}}else sendToHost({type:'rebuy'})};
-window.doReset=()=>{cleanupNet();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
-window.doNewGame=()=>{cleanupNet();G.screen='home';render()};
+window.doReset=()=>{cleanupNet();clearSession();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
+window.doNewGame=()=>{cleanupNet();clearSession();G.screen='home';render()};
 
-render();
+// On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
+(function(){
+  let s=null;try{s=JSON.parse(sessionStorage.getItem('hangout_sess')||'null')}catch(e){}
+  if(s&&s.room&&s.name){G.myName=s.name;joinRoom(s.room);return}
+  render();
+})();
+// Warn before an accidental refresh/close during an active hand.
+window.addEventListener('beforeunload',e=>{if(G.screen==='game'&&G.hand&&G.hand.status!=='complete'){e.preventDefault();e.returnValue=''}});
 </script>
 </body>
 </html>
