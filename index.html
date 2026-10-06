@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Poker Night</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0d0d0f;--surface:#18181b;--s2:#222225;--border:#2e2e33;--text:#e4e4e7;--dim:#71717a;--bright:#fafafa;--gold:#c9a033;--gold-dim:rgba(201,160,51,.15);--red:#ef4444;--green:#22c55e;--felt:#1a5c3a;--r:10px;font-family:'Inter',system-ui,sans-serif;color-scheme:dark}
+body{background:var(--bg);color:var(--text);min-height:100dvh;overflow-x:hidden;-webkit-tap-highlight-color:transparent}
+button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
+.screen{display:none;flex-direction:column;min-height:100dvh;padding:16px}.screen.active{display:flex}
+.btn-g{background:linear-gradient(135deg,#c9a033,#b8912a);color:#1a1400;font-weight:700;font-size:.9rem;padding:12px 20px;border-radius:var(--r)}.btn-g:active{opacity:.8}
+.btn-o{background:0 0;color:var(--text);border:1.5px solid var(--border);font-weight:600;font-size:.85rem;padding:10px 16px;border-radius:var(--r)}.btn-o:active{background:var(--s2)}
+.btn-sm{padding:6px 12px;font-size:.78rem}
+.btn-fold{background:var(--red);color:#fff;font-weight:700;padding:12px;border-radius:var(--r)}
+.btn-check{background:var(--s2);color:var(--text);font-weight:700;padding:12px;border-radius:var(--r);border:1.5px solid var(--border)}
+.btn-call{background:var(--green);color:#fff;font-weight:700;padding:12px;border-radius:var(--r)}
+.btn-allin{background:linear-gradient(135deg,#c9a033,#e6b94a);color:#1a1400;font-weight:800;padding:12px;border-radius:var(--r)}
+.center-wrap{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:20px;max-width:360px;margin:0 auto;width:100%}
+.center-wrap h1{font-size:1.5rem;font-weight:800;color:var(--gold)}
+.fg{display:flex;flex-direction:column;gap:4px;width:100%}
+.fg label{font-size:.78rem;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+.fg input{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:10px 12px;color:var(--bright);font-size:1rem;width:100%}
+.fg input:focus{outline:0;border-color:var(--gold)}
+.fr{display:flex;gap:12px;width:100%}.fr .fg{flex:1}
+.lw{flex:1;display:flex;flex-direction:column;gap:14px;max-width:480px;margin:0 auto;width:100%}
+.info-bar{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.chip{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:.75rem;font-weight:500;color:var(--dim);white-space:nowrap}.chip b{color:var(--bright);font-weight:600}
+.ptc{position:relative;width:100%;max-width:420px;margin:0 auto;aspect-ratio:8/5}
+.pf{position:absolute;top:18%;left:6%;right:6%;bottom:18%;background:radial-gradient(ellipse at 50% 45%,#2a8a5e,#1a6b43 50%,#145435 100%);border-radius:120px;border:8px solid #8b6914;box-shadow:inset 0 0 30px rgba(0,0,0,.25),0 0 0 4px #6a4f0e,0 0 0 8px #3d2e0a,0 6px 24px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+.fl{color:rgba(201,160,51,.12);font-size:.8rem;font-weight:700;letter-spacing:.25em;text-transform:uppercase;pointer-events:none;user-select:none}
+.ts{position:absolute;transform:translate(-50%,-50%);z-index:2}
+.tsi{background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--r);padding:6px 5px;min-width:58px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px}
+.tsi.ck{cursor:pointer}.tsi.ck:active{border-color:var(--gold);background:var(--s2)}
+.ts.occ .tsi{border-style:solid}.ts.me .tsi{border-color:var(--gold);background:var(--gold-dim)}
+.ts.act .tsi{border-color:var(--gold);box-shadow:0 0 12px rgba(201,160,51,.4)}
+.sn{font-size:.55rem;color:var(--dim);font-weight:600}
+.sname{font-weight:600;font-size:.65rem;color:var(--bright);max-width:54px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.schips{font-size:.55rem;color:var(--gold);font-weight:600}
+.sempty{color:var(--dim);font-size:.6rem}
+.sbadge{font-size:.48rem;font-weight:700;background:var(--gold);color:#1a1400;padding:1px 4px;border-radius:3px;margin-top:1px}
+.sbet{font-size:.5rem;color:var(--green);font-weight:600;margin-top:1px}
+.ts.fold .sname{color:var(--dim);text-decoration:line-through}
+.gw{flex:1;display:flex;flex-direction:column;gap:12px;max-width:480px;margin:0 auto;width:100%;padding-bottom:220px}
+.gh{display:flex;align-items:center;justify-content:space-between;padding-block:4px}
+.rb{background:var(--felt);color:var(--gold);font-weight:700;font-size:.75rem;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:.08em}
+.hn{font-size:.8rem;color:var(--dim);font-weight:500}
+.pd{text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px}
+.pl{font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.pa{font-size:1.8rem;font-weight:800;color:var(--gold)}
+.pdl{font-size:.8rem;color:var(--dim)}
+.la{text-align:center;font-size:.8rem;color:var(--dim);font-style:italic;padding:4px}
+.ap{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:10}
+.ab{display:flex;gap:8px}.ab button{flex:1}
+.rr{display:flex;gap:8px;align-items:center}
+.rr input[type=range]{flex:1;accent-color:var(--gold)}
+.rr input[type=number]{width:70px;background:var(--s2);border:1px solid var(--border);border-radius:var(--r);color:var(--bright);font-size:.85rem;padding:6px;text-align:center}
+.hp{display:flex;flex-direction:column;gap:8px;align-items:center}
+.hm{font-size:.8rem;color:var(--dim);text-align:center}
+.cds{padding:10px 0;text-align:center}.cdg{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:8px}
+.cdi{display:flex;flex-direction:column;align-items:center;gap:3px}
+.pc{width:42px;height:60px;background:var(--s2);border:2px solid var(--border);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.pc.red{color:var(--red)}.pc.black{color:var(--bright)}
+.cr{font-size:1rem}.cs{font-size:.8rem}
+.cn{font-size:.6rem;color:var(--dim);font-weight:600;max-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crl{font-size:.52rem;color:var(--gold);font-weight:700}
+.rw{flex:1;display:flex;flex-direction:column;gap:16px;max-width:400px;margin:0 auto;width:100%;padding-top:20px}
+.rw h1{text-align:center;font-size:1.3rem;color:var(--gold)}
+.rrow{display:flex;justify-content:space-between;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px}
+.rn{font-weight:600;color:var(--bright)}.rc{font-weight:700;color:var(--gold)}
+.rd{font-size:.85rem;color:var(--dim)}.rp{font-size:.8rem;font-weight:600}.rp.up{color:var(--green)}.rp.down{color:var(--red)}
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.mb{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:24px 20px;width:90%;max-width:320px;display:flex;flex-direction:column;gap:14px}
+.mb h3{text-align:center;color:var(--bright);font-size:1rem}
+.mb input{width:100%;box-sizing:border-box;padding:10px 12px;font-size:1rem;border:1.5px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--bright);text-align:center}
+.mb input:focus{outline:0;border-color:var(--gold)}
+.mbs{display:flex;gap:8px}.mbs button{flex:1}
+.toast{position:fixed;top:40px;left:50%;transform:translateX(-50%);background:var(--s2);color:var(--bright);padding:10px 20px;border-radius:20px;font-size:.82rem;font-weight:600;border:1px solid var(--border);z-index:50;opacity:0;transition:opacity .3s;pointer-events:none;text-align:center;max-width:90%}
+.toast.show{opacity:1}
+.conn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.conn-dot.on{background:var(--green)}.conn-dot.off{background:var(--red)}
+@media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script>
+// ===== CONSTANTS =====
+const SEATS=[1,2,3,4,5,6,7,8,9,10],ROUNDS=['preflop','flop','turn','river','showdown'];
+const RL={preflop:'Pre-flop',flop:'Flop',turn:'Turn',river:'River',showdown:'Showdown'};
+const RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'],SUITS=['♣','♦','♥','♠'];
+const RV={2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,J:11,Q:12,K:13,A:14},SV={'♣':1,'♦':2,'♥':3,'♠':4};
+const cv=(r,s)=>RV[r]*10+SV[s], isRed=s=>s==='♥'||s==='♦';
+const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
+const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50-48*Math.cos(a),top:50+44*Math.sin(a)}};
+
+// ===== STATE =====
+let peer=null, conns=[], hostConn=null;
+let G={
+  screen:'home',roomId:null,myId:null,myName:'',isHost:false,
+  config:null,players:{},hand:null,cardDraw:null,
+};
+
+// ===== TOAST =====
+let tt;
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2500)}
+
+// ===== P2P NETWORKING =====
+function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
+
+function broadcast(){
+  // Host sends full state to all players
+  const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};
+  conns.forEach(c=>{try{c.send(msg)}catch(e){}});
+  render();
+}
+
+function handlePlayerMsg(data,connId){
+  // Host receives action from a player
+  if(!G.isHost)return;
+  if(data.type==='join'){
+    // Player wants to sit
+    if(data.seat&&data.name){
+      const taken=Object.values(G.players).some(p=>p.seat===data.seat&&p.id!==connId);
+      if(taken)return;
+      G.players[connId]={id:connId,name:data.name,seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
+      toast(data.name+' sat at seat '+data.seat);
+      broadcast();
+    }
+  }else if(data.type==='leave'){
+    delete G.players[connId];
+    toast('Player left');
+    broadcast();
+  }else if(data.type==='bet'){
+    processBet(connId,data.action,data.amount);
+  }else if(data.type==='rebuy'){
+    const p=G.players[connId];
+    if(p){
+      p.chips+=G.config.buyInDollars*G.config.chipRatio;
+      p.totalBuyIn+=G.config.buyInDollars;
+      toast(p.name+' re-bought');
+      broadcast();
+    }
+  }
+}
+
+function createHost(config){
+  G.roomId=genCode();
+  G.isHost=true;
+  G.config={...config,status:'lobby'};
+  G.myId='host';
+  G.players={};
+  G.hand=null;
+  G.cardDraw=null;
+
+  peer=new Peer('PKRN_'+G.roomId,{debug:0});
+  peer.on('open',()=>{
+    toast('Room '+G.roomId+' created!');
+    // Host auto-sits seat 1
+    G.players['host']={id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true};
+    G.screen='lobby';
+    render();
+  });
+  peer.on('connection',conn=>{
+    conns.push(conn);
+    conn.on('data',d=>handlePlayerMsg(d,conn.peer));
+    conn.on('close',()=>{
+      conns=conns.filter(c=>c!==conn);
+      // Don't remove player on temporary disconnect — they might reconnect
+    });
+    // Send current state to new joiner
+    conn.on('open',()=>{
+      conn.send({type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId});
+    });
+  });
+  peer.on('error',e=>{
+    if(e.type==='unavailable-id'){toast('Room code taken — try again');G.screen='home';render();}
+    else{toast('Connection error: '+e.type);console.error(e);}
+  });
+}
+
+function joinRoom(code){
+  G.roomId=code.toUpperCase();
+  G.isHost=false;
+  G.myId=null;
+  peer=new Peer(undefined,{debug:0});
+  peer.on('open',id=>{
+    G.myId=id;
+    hostConn=peer.connect('PKRN_'+G.roomId,{reliable:true});
+    hostConn.on('open',()=>{toast('Connected to room '+G.roomId)});
+    hostConn.on('data',d=>{
+      if(d.type==='state'){
+        G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
+        // Update screen based on status
+        if(G.config?.status==='lobby'&&G.screen!=='lobby'){G.screen='lobby'}
+        if(G.config?.status==='playing'&&G.screen==='lobby'){G.screen='game'}
+        if(G.config?.status==='ended'){G.screen='results'}
+        render();
+      }
+    });
+    hostConn.on('close',()=>{toast('Disconnected from host');});
+    hostConn.on('error',e=>{toast('Connection error');console.error(e)});
+  });
+  peer.on('error',e=>{
+    if(e.type==='peer-unavailable'){toast('Room not found');G.screen='home';render();}
+    else{toast('Error: '+e.type)}
+  });
+  G.screen='lobby';
+  render();
+}
+
+function sendToHost(msg){
+  if(G.isHost){handlePlayerMsg(msg,G.myId);return}
+  if(hostConn?.open)hostConn.send(msg);else toast('Not connected');
+}
+
+// ===== GAME LOGIC (runs on host only) =====
+function activePlayers(){return Object.values(G.players).filter(p=>p.active).sort((a,b)=>a.seat-b.seat)}
+function playerBySeat(s,pl){return(pl||activePlayers()).find(p=>p.seat===s)||null}
+function nextSeat(from,pl){const ss=pl.map(p=>p.seat).sort((a,b)=>a-b);if(!ss.length)return null;for(const s of ss)if(s>from)return s;return ss[0]}
+function blindSeats(ds,pl){if(pl.length===2)return{sb:ds,bb:nextSeat(ds,pl)};const sb=nextSeat(ds,pl);return{sb,bb:nextSeat(sb,pl)}}
+
+function dealHand(){
+  const pl=activePlayers();
+  if(pl.length<2){toast('Need 2+ players');return}
+  const lastD=G.hand?.dealerSeat||0,ds=nextSeat(lastD,pl),bl=blindSeats(ds,pl);
+  const hn=(G.hand?.handNum||0)+1;
+  const sbP=playerBySeat(bl.sb,pl),bbP=playerBySeat(bl.bb,pl);
+  if(!sbP||!bbP)return;
+  const sbA=Math.min(G.config.smallBlind,sbP.chips),bbA=Math.min(G.config.bigBlind,bbP.chips);
+  sbP.chips-=sbA;bbP.chips-=bbA;
+  const bets={};bets[bl.sb]=sbA;bets[bl.bb]=bbA;
+  G.hand={handNum:hn,dealerSeat:ds,sbSeat:bl.sb,bbSeat:bl.bb,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,folded:[],allIn:[],acted:[],currentSeat:nextSeat(bl.bb,pl),status:'betting',lastAction:'Blinds posted',winner:null};
+  toast('Hand #'+hn+' dealt');
+  broadcast();
+}
+
+function processBet(playerId,action,raiseAmt){
+  const h=G.hand,me=G.players[playerId];
+  if(!h||!me||h.status!=='betting')return;
+  if(h.currentSeat!==me.seat)return;
+  const pl=activePlayers(),myBet=(h.bets||{})[me.seat]||0;
+
+  if(action==='fold'){
+    h.folded.push(me.seat);h.lastAction=me.name+' folded';
+  }else if(action==='check'){
+    if(myBet<h.currentBet)return;
+    h.lastAction=me.name+' checked';
+  }else if(action==='call'){
+    const amt=Math.min(h.currentBet-myBet,me.chips);
+    me.chips-=amt;h.bets[me.seat]=myBet+amt;
+    if(me.chips===0)h.allIn.push(me.seat);
+    h.lastAction=me.name+' called '+amt;
+  }else if(action==='raise'){
+    const add=raiseAmt-myBet;
+    if(add>me.chips)return;
+    me.chips-=add;h.bets[me.seat]=raiseAmt;
+    h.currentBet=raiseAmt;h.lastRaise=raiseAmt-h.currentBet||G.config.bigBlind;
+    h.acted=[];
+    if(me.chips===0)h.allIn.push(me.seat);
+    h.lastAction=me.name+' raised to '+raiseAmt;
+  }else if(action==='allin'){
+    const total=myBet+me.chips;
+    if(total>h.currentBet){h.lastRaise=total-h.currentBet;h.currentBet=total;h.acted=[]}
+    h.bets[me.seat]=total;h.lastAction=me.name+' all-in '+me.chips;
+    me.chips=0;h.allIn.push(me.seat);
+  }else return;
+
+  if(!h.acted.includes(me.seat))h.acted.push(me.seat);
+
+  const notFolded=pl.filter(p=>!h.folded.includes(p.seat));
+  if(notFolded.length<=1){
+    const w=notFolded[0],pot=h.pot+Object.values(h.bets).reduce((s,v)=>s+v,0);
+    if(w)w.chips+=pot;
+    h.status='complete';h.pot=pot;h.bets={};h.winner=w?.id;h.lastAction=(w?.name||'?')+' wins '+pot+' (all folded)';
+    toast(h.lastAction);broadcast();return;
+  }
+
+  const canAct=pl.filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
+  if(canAct.every(p=>h.acted.includes(p.seat))&&canAct.length>0){
+    h.status='roundComplete';
+  }else{
+    h.currentSeat=nextSeat(me.seat,canAct);
+  }
+  broadcast();
+}
+
+function advanceRound(){
+  const h=G.hand;if(!h)return;
+  const ri=ROUNDS.indexOf(h.round),nr=ROUNDS[ri+1];if(!nr)return;
+  h.pot+=Object.values(h.bets||{}).reduce((s,v)=>s+v,0);h.bets={};h.acted=[];
+  if(nr==='showdown'){h.round='showdown';h.status='showdown';h.lastAction='Showdown';broadcast();return}
+  const pl=activePlayers().filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
+  h.round=nr;h.currentBet=0;h.lastRaise=G.config.bigBlind;h.currentSeat=nextSeat(h.dealerSeat,pl);h.status='betting';h.lastAction=RL[nr];
+  broadcast();
+}
+
+function selectWinner(pid){
+  const h=G.hand;if(!h)return;
+  const pot=h.pot+Object.values(h.bets||{}).reduce((s,v)=>s+v,0);
+  const w=G.players[pid];if(!w)return;
+  w.chips+=pot;h.status='complete';h.winner=pid;h.pot=pot;h.bets={};h.lastAction=w.name+' wins '+pot;
+  toast(h.lastAction);broadcast();
+}
+
+function drawCards(){
+  const pIds=Object.keys(G.players);if(pIds.length<2){toast('Need 2+ players');return}
+  const deck=[];for(const r of RANKS)for(const s of SUITS)deck.push({rank:r,suit:s});
+  for(let i=deck.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}
+  const draws={};pIds.forEach((id,i)=>{const c=deck[i];draws[id]={rank:c.rank,suit:c.suit,value:cv(c.rank,c.suit)}});
+  const sorted=Object.entries(draws).sort((a,b)=>b[1].value-a[1].value);
+  const order=[sorted[0]];for(let i=sorted.length-1;i>=1;i--)order.push(sorted[i]);
+  const seating={};order.forEach(([id],i)=>{seating[id]=i+1;G.players[id].seat=i+1});
+  G.cardDraw={done:true,cards:draws,seating};
+  toast('Cards drawn!');broadcast();
+}
+
+function reshuffleSeats(){G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Reshuffle!');broadcast();setTimeout(()=>drawCards(),500)}
+function startGame(){G.config.status='playing';broadcast()}
+function endGame(){G.config.status='ended';broadcast()}
+function backToLobby(){G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
+
+// ===== RENDER =====
+function render(){
+  const app=document.getElementById('app');
+  switch(G.screen){
+    case'home':return rHome(app);case'join':return rJoin(app);
+    case'lobby':return rLobby(app);case'game':return rGame(app);case'results':return rResults(app);
+  }
+}
+
+function rHome(app){
+  app.innerHTML=`<div class="screen active"><div class="center-wrap">
+    <div style="font-size:2.2rem;letter-spacing:4px">♠♥♦♣</div><h1>Poker Night</h1>
+    <form id="sf" style="display:flex;flex-direction:column;gap:12px;width:100%">
+      <div class="fg"><label>Your Name</label><input type="text" id="iname" placeholder="Enter name" maxlength="12" required autocomplete="off"></div>
+      <div class="fg"><label>Buy-in ($)</label><input type="number" id="ibi" value="20" min="1"></div>
+      <div class="fg"><label>Chips per Dollar</label><input type="number" id="icr" value="10" min="1"></div>
+      <div class="fr"><div class="fg"><label>Small Blind</label><input type="number" id="isb" value="5" min="1"></div>
+      <div class="fg"><label>Big Blind</label><input type="number" id="ibb" value="10" min="1"></div></div>
+      <div class="fg"><label>Reshuffle Every N Hands (0=off)</label><input type="number" id="ire" value="3" min="0" max="20"></div>
+      <button type="submit" class="btn-g" style="width:100%;margin-top:4px">Create Table</button>
+    </form>
+    <div style="text-align:center;width:100%">
+      <div style="color:var(--dim);font-size:.78rem;margin:8px 0">— or —</div>
+      <button class="btn-o" onclick="G.screen='join';render()" style="width:100%">Join a Table</button>
+    </div>
+  </div></div>`;
+  document.getElementById('sf').onsubmit=e=>{
+    e.preventDefault();
+    G.myName=document.getElementById('iname').value.trim();if(!G.myName)return;
+    createHost({buyInDollars:+document.getElementById('ibi').value||20,chipRatio:+document.getElementById('icr').value||10,
+      smallBlind:+document.getElementById('isb').value||5,bigBlind:+document.getElementById('ibb').value||10,
+      reshuffleEvery:+document.getElementById('ire').value||0});
+  };
+}
+
+function rJoin(app){
+  app.innerHTML=`<div class="screen active"><div class="center-wrap">
+    <div style="font-size:2.2rem;letter-spacing:4px">♠♥♦♣</div><h1>Join Table</h1>
+    <form id="jf" style="display:flex;flex-direction:column;gap:12px;width:100%">
+      <div class="fg"><label>Your Name</label><input type="text" id="jname" placeholder="Enter name" maxlength="12" required autocomplete="off"></div>
+      <div class="fg"><label>Room Code</label><input type="text" id="jcode" placeholder="e.g. ABC12" maxlength="5" required autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:1.4rem;font-weight:700;letter-spacing:.15em"></div>
+      <button type="submit" class="btn-g" style="width:100%">Join</button>
+      <button type="button" class="btn-o" onclick="G.screen='home';render()" style="width:100%">Back</button>
+    </form>
+  </div></div>`;
+  document.getElementById('jf').onsubmit=e=>{
+    e.preventDefault();
+    G.myName=document.getElementById('jname').value.trim();
+    const code=document.getElementById('jcode').value.trim();
+    if(!G.myName||!code)return;
+    joinRoom(code);
+  };
+}
+
+function rLobby(app){
+  if(!G.config)return void(app.innerHTML=`<div class="screen active"><div class="center-wrap"><h1>Connecting…</h1><p style="color:var(--dim)">Waiting for host</p></div></div>`);
+  const pl=G.players||{},pc=Object.keys(pl).length,myP=pl[G.myId],cc=G.config.buyInDollars*G.config.chipRatio,cd=G.cardDraw;
+  let seats='';
+  for(let i=0;i<SEATS.length;i++){
+    const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(pl).find(([,p])=>p.seat===sn);
+    const isMe=occ&&occ[0]===G.myId;
+    let cls='ts';if(occ)cls+=' occ';if(isMe)cls+=' me';
+    let inner='';
+    if(occ){
+      const[oid,op]=occ;let badge='';
+      if(cd?.done&&cd.seating){const s=cd.seating[oid];if(s===1)badge='<span class="sbadge">D</span>';else if(s===2)badge='<span class="sbadge">SB</span>';else if(s===3&&pc>2)badge='<span class="sbadge">BB</span>'}
+      inner=`<div class="tsi"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span>${badge}</div>`;
+    }else{
+      const canSit=!myP;
+      inner=`<div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div>`;
+    }
+    seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">${inner}</div>`;
+  }
+  let cdHtml='';
+  if(cd?.done&&cd.cards){
+    const entries=Object.entries(cd.cards).sort((a,b)=>b[1].value-a[1].value);let cards='';
+    for(const[id,c]of entries){const seat=cd.seating?.[id];let role='Seat '+seat;if(seat===1)role+=' · D';else if(seat===2)role+=' · SB';else if(seat===3&&entries.length>2)role+=' · BB';
+      cards+=`<div class="cdi"><div class="pc ${isRed(c.suit)?'red':'black'}"><span class="cr">${c.rank}</span><span class="cs">${c.suit}</span></div><span class="cn">${esc(pl[id]?.name||'?')}</span><span class="crl">${role}</span></div>`}
+    cdHtml=`<div class="cds"><div style="font-size:.85rem;font-weight:700;color:var(--bright)">Card Draw</div><div class="cdg">${cards}</div></div>`;
+  }
+  const isH=G.isHost;
+  app.innerHTML=`<div class="screen active"><div class="lw">
+    <h1 style="text-align:center;color:var(--gold)">Poker Night</h1>
+    <div style="text-align:center;font-size:.9rem;font-weight:700;letter-spacing:.15em;color:var(--dim)">Room: ${G.roomId}</div>
+    <div class="info-bar">
+      <span class="chip">Buy-in <b>$${G.config.buyInDollars}</b></span><span class="chip">Chips <b>${cc}</b></span>
+      <span class="chip">Blinds <b>${G.config.smallBlind}/${G.config.bigBlind}</b></span><span class="chip">Players <b>${pc}/10</b></span>
+      ${G.config.reshuffleEvery?`<span class="chip">Reshuffle <b>every ${G.config.reshuffleEvery}</b></span>`:''}
+    </div>
+    <div class="ptc"><div class="pf"><span class="fl">Poker Night</span></div>${seats}</div>
+    ${cdHtml}
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+      ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
+      ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Draw for Seats</button>`:''}
+      ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
+      ${isH&&pc<2?`<p style="color:var(--dim);font-size:.85rem">Need at least 2 players to start</p>`:''}
+      ${isH?`<button class="btn-o btn-sm" onclick="doReset()" style="margin-top:6px;font-size:.72rem;color:var(--dim)">⚙ New Table</button>`:''}
+    </div>
+  </div></div>`;
+}
+
+function rGame(app){
+  if(!G.config)return;
+  const h=G.hand,me=G.players[G.myId],isH=G.isHost,pl=activePlayers();
+  const pot=h?(h.pot||0)+Object.values(h.bets||{}).reduce((s,v)=>s+v,0):0;
+  const potD=(pot/G.config.chipRatio).toFixed(2);
+  let seats='';
+  for(let i=0;i<SEATS.length;i++){
+    const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
+    if(!occ){seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi"><span class="sn">S${sn}</span><span class="sempty">—</span></div></div>`;continue}
+    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&!isFold;
+    let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
+    let badge='';if(h){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
+    const bet=(h?.bets||{})[sn];
+    seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
+      <div class="tsi ${isSD?'ck':''}" ${isSD&&isH?`onclick="selectWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''}</div></div>`;
+  }
+  const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
+  app.innerHTML=`<div class="screen active"><div class="gw">
+    <div class="gh"><span class="rb">${h?RL[h.round]||h.round:'Waiting'}</span><span class="hn">${hnd}</span></div>
+    <div class="pd"><div class="pl">Pot</div><div class="pa">${pot}</div><div class="pdl">$${potD}</div></div>
+    <div class="ptc"><div class="pf"><span class="fl">${G.roomId}</span></div>${seats}</div>
+    ${h?.lastAction?`<div class="la">${esc(h.lastAction)}</div>`:''}
+    ${me?`<div style="text-align:center"><button class="btn-o btn-sm" onclick="doRebuy()">Re-buy ($${G.config.buyInDollars})</button></div>`:''}
+  </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
+  const sl=document.getElementById('rsl'),ni=document.getElementById('ramt');
+  if(sl&&ni){sl.oninput=()=>{ni.value=sl.value};ni.oninput=()=>{sl.value=ni.value}}
+}
+
+function rActionPanel(h,me,isH,pl){
+  if(isH){
+    if(!h||h.status==='complete'){
+      const re=G.config?.reshuffleEvery||0,hn=h?.handNum||0,nr=re>0&&hn>0&&hn%re===0;
+      return`<div class="hp"><div class="ab">${nr?`<button class="btn-g" onclick="reshuffleSeats()" style="flex:2">🔄 Reshuffle</button><button class="btn-o" onclick="dealHand()">Skip</button>`
+        :`<button class="btn-g" onclick="dealHand()" style="flex:2">${h?'Deal Next':'Deal First Hand'}</button>`}<button class="btn-o" onclick="endGame()">End</button></div>
+        ${nr?`<div style="text-align:center;font-size:.72rem;color:var(--dim)">Time to reshuffle (every ${re} hands)</div>`:''}
+        <button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div>`;
+    }
+    if(h.status==='roundComplete'){const ri=ROUNDS.indexOf(h.round),nx=ROUNDS[ri+1],lb=nx==='showdown'?'Go to Showdown':'Deal '+RL[nx];
+      return`<div class="hp"><div class="hm">Betting complete</div><div class="ab"><button class="btn-g" onclick="advanceRound()">${lb}</button></div></div>`}
+    if(h.status==='showdown')return`<div class="hp"><div class="hm">Tap the winner's seat above</div></div>`;
+  }
+  if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
+    const mb=(h.bets||{})[me.seat]||0,tc=h.currentBet-mb,cc=tc===0,mn=h.currentBet+(h.lastRaise||G.config.bigBlind),mx=mb+me.chips;
+    return`<div class="ab"><button class="btn-fold" onclick="doBet('fold')">Fold</button>
+      ${cc?`<button class="btn-check" onclick="doBet('check')">Check</button>`:`<button class="btn-call" onclick="doBet('call')">Call<br><small>${Math.min(tc,me.chips)}</small></button>`}
+      <button class="btn-allin" onclick="doBet('allin')">All-in<br><small>${me.chips}</small></button></div>
+      ${mx>=mn?`<div class="rr"><input type="range" id="rsl" min="${mn}" max="${mx}" value="${mn}" step="${G.config.bigBlind}"><input type="number" id="ramt" value="${mn}" min="${mn}" max="${mx}"><button class="btn-g btn-sm" onclick="doBet('raise',+document.getElementById('ramt').value)">Raise</button></div>`:''}`
+  }
+  if(h?.status==='betting'){const cp=playerBySeat(h.currentSeat);return`<div class="hm">Waiting for ${cp?esc(cp.name):'next player'}…</div>`}
+  if(!isH&&h?.status==='showdown')return`<div class="hm">Showdown — host picks the winner</div>`;
+  if(!isH&&(!h||h.status==='complete'))return`<div class="hm">Waiting for host to deal…</div>`;
+  return'';
+}
+
+function rResults(app){
+  if(!G.config)return;
+  const entries=Object.values(G.players).sort((a,b)=>b.chips-a.chips);let rows='';
+  for(const p of entries){const fd=(p.chips/G.config.chipRatio).toFixed(2),pr=parseFloat(fd)-p.totalBuyIn,pc=pr>=0?'up':'down',ps=pr>=0?'+$'+pr.toFixed(2):'-$'+Math.abs(pr).toFixed(2);
+    rows+=`<div class="rrow"><div><div class="rn">${esc(p.name)}</div><div class="rd">$${fd} final</div></div><div style="text-align:right"><div class="rc">${p.chips} chips</div><div class="rp ${pc}">${ps}</div></div></div>`}
+  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
+      ${G.isHost?`<button class="btn-g" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
+      <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
+    </div></div></div>`;
+}
+
+// ===== UI ACTIONS =====
+window.showSeatModal=function(sn){
+  const old=document.getElementById('smod');if(old)old.remove();
+  const div=document.createElement('div');div.id='smod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Seat ${sn}</h3><input id="snin" type="text" placeholder="Your name" maxlength="12" value="${esc(G.myName||'')}" autocomplete="off">
+    <div class="mbs"><button class="btn-o" onclick="document.getElementById('smod').remove()">Cancel</button><button class="btn-g" id="scbtn">Sit Down</button></div></div>`;
+  document.body.appendChild(div);
+  const inp=document.getElementById('snin');setTimeout(()=>inp?.focus(),50);
+  const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;
+    if(G.isHost){G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};toast(nm+' sat at seat '+sn);broadcast()}
+    else{sendToHost({type:'join',seat:sn,name:nm})}};
+  document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+};
+window.doLeave=()=>{if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
+window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
+window.doRebuy=()=>{if(G.isHost){const m=G.players[G.myId];if(m){m.chips+=G.config.buyInDollars*G.config.chipRatio;m.totalBuyIn+=G.config.buyInDollars;toast(m.name+' re-bought');broadcast()}}else sendToHost({type:'rebuy'})};
+window.doReset=()=>{if(peer)peer.destroy();peer=null;conns=[];hostConn=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
+window.doNewGame=()=>{if(peer)peer.destroy();peer=null;conns=[];hostConn=null;G.screen='home';render()};
+
+render();
+</script>
+</body>
+</html>
