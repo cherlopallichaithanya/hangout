@@ -87,6 +87,11 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .toast.show{opacity:1}
 .conn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
 .conn-dot.on{background:var(--green)}.conn-dot.off{background:var(--red)}
+.tsi.winsel{border-color:var(--green)!important;box-shadow:0 0 0 2px var(--green),0 0 10px rgba(34,197,94,.5)}
+.settle{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.settle-h{font-size:.8rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;text-align:center}
+.settle-row{display:flex;justify-content:space-between;align-items:center;font-size:.9rem;color:var(--text);gap:10px}
+.settle-row b{color:var(--green);white-space:nowrap}
 @media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}}
 </style>
 </head>
@@ -132,7 +137,7 @@ function stablePlayerId(room){
   return id;
 }
 // Remember the current room/name for THIS tab only, so a refresh auto-rejoins (but a fresh open doesn't).
-function saveSession(){try{sessionStorage.setItem('hangout_sess',JSON.stringify({room:G.roomId,name:G.myName}))}catch(e){}}
+function saveSession(){try{sessionStorage.setItem('hangout_sess',JSON.stringify({room:G.roomId,name:G.myName,host:!!G.isHost}))}catch(e){}}
 function clearSession(){try{sessionStorage.removeItem('hangout_sess')}catch(e){}}
 
 // Map the shared game status to the right screen for THIS client (host and players alike).
@@ -220,7 +225,12 @@ function createHost(config){
   G.cardDraw=null;
   G.screen='lobby';
   render();
+  saveSession();
+  hostConnect();
+}
 
+// Host's broker wiring, shared by createHost and resumeHost.
+function hostConnect(){
   client=mqttConnect(c=>{
     // On first connect (and every reconnect) subscribe to actions and (re)publish table state.
     c.subscribe(topicAction(G.roomId),{qos:1},()=>{toast('Room '+G.roomId+' live!');broadcast()});
@@ -233,6 +243,30 @@ function createHost(config){
   });
   // If we can't reach the broker, the room is invisible to everyone — say so clearly.
   setTimeout(()=>{if(!(client&&client.connected))toast('Can’t reach the game server on this network — try other WiFi or mobile data')},10000);
+}
+
+// Restore an in-progress table after the host refreshes/reopens the tab, using the retained state.
+function resumeHost(room,name){
+  G.roomId=room;G.isHost=true;G.myId='host';G.myName=name;
+  let restored=false;
+  client=mqttConnect(c=>{c.subscribe(topicState(room),{qos:1});c.subscribe(topicAction(room),{qos:1})});
+  client.on('message',(topic,payload)=>{
+    if(topic===topicState(room)&&!restored){
+      let d;try{d=JSON.parse(payload.toString())}catch(e){return}
+      if(!d||d.type!=='state')return;
+      restored=true;clearTimeout(joinTimer);
+      G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
+      G.screen=d.config?.status==='playing'?'game':(d.config?.status==='ended'?'results':'lobby');
+      try{client.unsubscribe(topicState(room))}catch(e){}
+      render();broadcast();   // we are the host again; re-assert the retained state
+    }else if(topic===topicAction(room)&&restored){
+      let data;try{data=JSON.parse(payload.toString())}catch(e){return}
+      if(!data||data.from==='host')return;
+      handlePlayerMsg(data,data.from);
+    }
+  });
+  G.screen='lobby';render();
+  joinTimer=setTimeout(()=>{if(!restored){toast('Couldn’t restore your table');clearSession();G.screen='home';render()}},9000);
 }
 
 function joinRoom(code){
@@ -406,19 +440,45 @@ function resolveAutoPots(h){
   }
   if(h.potIdx>=h.pots.length)h.status='complete';
 }
-function selectWinner(pid){
-  const h=G.hand;if(!h||h.status!=='showdown')return;
+// Showdown: host taps the winning seat(s) for the current pot, then awards. Tapping 2+ splits/chops it.
+function toggleWinner(pid){
+  const h=G.hand;if(!h||h.status!=='showdown'||!h.pots)return;
   const w=G.players[pid];if(!w)return;
-  if(!h.pots||!h.pots.length){                               // safety fallback: one undivided pot
-    w.chips+=h.pot;h.status='complete';h.winner=pid;h.lastAction=w.name+' wins '+h.pot;toast(h.lastAction);broadcast();return;
-  }
-  const pot=h.pots[h.potIdx];if(!pot)return;
-  if(!pot.eligible.includes(w.seat)){toast(w.name+' can’t win this pot (wasn’t in it)');return}
-  w.chips+=pot.amount;pot.winner=pid;h.winner=pid;
-  h.lastAction=w.name+' wins '+pot.amount+(h.pots.length>1?' (pot '+(h.potIdx+1)+'/'+h.pots.length+')':'');
-  toast(h.lastAction);
-  h.potIdx++;resolveAutoPots(h);
+  const pot=h.pots[h.potIdx];if(!pot||!pot.eligible.includes(w.seat)){toast((w.name||'That seat')+' can’t win this pot');return}
+  h.sel=h.sel||[];const i=h.sel.indexOf(pid);
+  if(i>=0)h.sel.splice(i,1);else h.sel.push(pid);
   broadcast();
+}
+function awardCurrentPot(){
+  const h=G.hand;if(!h||h.status!=='showdown'||!h.pots)return;
+  const pot=h.pots[h.potIdx];if(!pot)return;
+  const sel=(h.sel||[]).filter(id=>{const p=G.players[id];return p&&pot.eligible.includes(p.seat)});
+  if(!sel.length){toast('Tap the winning seat(s) first');return}
+  const n=sel.length,base=Math.floor(pot.amount/n);let rem=pot.amount-base*n;
+  // Even split; any odd chip(s) go to the earliest seat(s).
+  const ordered=sel.slice().sort((a,b)=>G.players[a].seat-G.players[b].seat);
+  ordered.forEach(id=>{G.players[id].chips+=base+(rem>0?1:0);if(rem>0)rem--;});
+  pot.winner=n===1?sel[0]:sel.slice();h.winner=sel[0];
+  const names=sel.map(id=>G.players[id].name);
+  h.lastAction=(n>1?names.join(' & ')+' split '+pot.amount:names[0]+' wins '+pot.amount)+(h.pots.length>1?' (pot '+(h.potIdx+1)+'/'+h.pots.length+')':'');
+  toast(h.lastAction);
+  h.sel=[];h.potIdx++;resolveAutoPots(h);
+  broadcast();
+}
+// Minimal who-pays-whom to settle the session (greedy match of biggest debtor ↔ biggest creditor).
+function computeSettlement(){
+  const cr=G.config.chipRatio;
+  const nets=Object.values(G.players).map(p=>({name:p.name,net:(p.chips/cr)-p.totalBuyIn}));
+  const cred=nets.filter(x=>x.net>0.004).map(x=>({name:x.name,amt:x.net})).sort((a,b)=>b.amt-a.amt);
+  const deb=nets.filter(x=>x.net<-0.004).map(x=>({name:x.name,amt:-x.net})).sort((a,b)=>b.amt-a.amt);
+  const tx=[];let i=0,j=0;
+  while(i<deb.length&&j<cred.length){
+    const pay=Math.min(deb[i].amt,cred[j].amt);
+    tx.push({from:deb[i].name,to:cred[j].name,amt:pay});
+    deb[i].amt-=pay;cred[j].amt-=pay;
+    if(deb[i].amt<=0.004)i++;if(cred[j].amt<=0.004)j++;
+  }
+  return tx;
 }
 
 function drawCards(){
@@ -549,12 +609,12 @@ function rGame(app){
     const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
     if(!occ){seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi"><span class="sn">S${sn}</span><span class="sempty">—</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
-    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold);
+    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold),isSel=isSD&&h?.sel?.includes(oid);
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
     let badge='';if(h){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
     seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck':''}" ${isSD&&isH?`onclick="selectWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''}</div></div>`;
+      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
@@ -579,14 +639,16 @@ function rActionPanel(h,me,isH,pl){
       return`<div class="hp"><div class="ab">${nr?`<button class="btn-g" onclick="reshuffleSeats()" style="flex:2">🔄 Reshuffle</button><button class="btn-o" onclick="dealHand()">Skip</button>`
         :`<button class="btn-g" onclick="dealHand()" style="flex:2">${h?'Deal Next':'Deal First Hand'}</button>`}<button class="btn-o" onclick="endGame()">End</button></div>
         ${nr?`<div style="text-align:center;font-size:.72rem;color:var(--dim)">Time to reshuffle (every ${re} hands)</div>`:''}
-        <button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div>`;
+        <div style="display:flex;gap:8px;justify-content:center"><button class="btn-o btn-sm" onclick="reshuffleSeats()" style="font-size:.72rem">🔀 Shuffle Seats</button><button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div></div>`;
     }
     if(h.status==='roundComplete'){const ri=ROUNDS.indexOf(h.round),nx=ROUNDS[ri+1],lb=nx==='showdown'?'Go to Showdown':'Deal '+RL[nx];
       return`<div class="hp"><div class="hm">Betting complete</div><div class="ab"><button class="btn-g" onclick="advanceRound()">${lb}</button></div></div>`}
     if(h.status==='showdown'){
-      const pots=h.pots||[],p=pots[h.potIdx];
-      const label=p?(pots.length>1?`Side pots — Pot ${h.potIdx+1}/${pots.length}: ${p.amount} chips. Tap the winner (highlighted seats only)`:`Tap the winner's seat above (${p.amount} chips)`):'Tap the winner\'s seat above';
-      return`<div class="hp"><div class="hm">${label}</div></div>`;
+      const pots=h.pots||[],p=pots[h.potIdx],sel=(h.sel||[]).length;
+      if(!p)return`<div class="hp"><div class="hm">Resolving…</div></div>`;
+      const title=pots.length>1?`Pot ${h.potIdx+1}/${pots.length}: ${p.amount} chips`:`Pot: ${p.amount} chips`;
+      return`<div class="hp"><div class="hm">${title} — tap the winner(s), then Award. Tap 2+ to split/chop.</div>
+        <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award — split ${sel} ways`:'Award pot'}</button></div></div>`;
     }
   }
   if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
@@ -607,7 +669,9 @@ function rResults(app){
   const entries=Object.values(G.players).sort((a,b)=>b.chips-a.chips);let rows='';
   for(const p of entries){const fd=(p.chips/G.config.chipRatio).toFixed(2),pr=parseFloat(fd)-p.totalBuyIn,pc=pr>=0?'up':'down',ps=pr>=0?'+$'+pr.toFixed(2):'-$'+Math.abs(pr).toFixed(2);
     rows+=`<div class="rrow"><div><div class="rn">${esc(p.name)}</div><div class="rd">$${fd} final</div></div><div style="text-align:right"><div class="rc">${p.chips} chips</div><div class="rp ${pc}">${ps}</div></div></div>`}
-  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}
+  const tx=computeSettlement();
+  const settle=`<div class="settle"><div class="settle-h">Settle Up</div>${tx.length?tx.map(t=>`<div class="settle-row"><span>${esc(t.from)} pays ${esc(t.to)}</span><b>$${t.amt.toFixed(2)}</b></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">All square — no payments needed</div>`}</div>`;
+  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
       ${G.isHost?`<button class="btn-g" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
@@ -658,7 +722,7 @@ window.doNewGame=()=>{cleanupNet();clearSession();G.screen='home';render()};
 // On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
 (function(){
   let s=null;try{s=JSON.parse(sessionStorage.getItem('hangout_sess')||'null')}catch(e){}
-  if(s&&s.room&&s.name){G.myName=s.name;joinRoom(s.room);return}
+  if(s&&s.room&&s.name){G.myName=s.name;if(s.host)resumeHost(s.room,s.name);else joinRoom(s.room);return}
   render();
 })();
 // Warn before an accidental refresh/close during an active hand.
