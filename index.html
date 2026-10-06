@@ -176,8 +176,8 @@ function handlePlayerMsg(data,connId){
       if(taken)return;
       pushUndo();
       G.players[connId]={id:connId,name:data.name,seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
-      // Joining mid-hand: sit out the current hand (fold their seat); they play from the next deal.
-      if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(data.seat))G.hand.folded.push(data.seat);
+      // Joining mid-hand: sit out the current hand; they play from the next deal.
+      if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(data.seat)){G.hand.folded.push(data.seat);(G.hand.satOut=G.hand.satOut||[]).push(data.seat)}
       toast(data.name+' sat at seat '+data.seat);
       broadcast();
     }
@@ -636,12 +636,13 @@ function rGame(app){
     const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
     if(!occ){const canSit=!me;seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
-    const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold),isSel=isSD&&h?.sel?.includes(oid);
+    const isWait=h?.satOut?.includes(sn);
+    const[oid,op]=occ,isFold=h?.folded?.includes(sn)&&!isWait,isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold&&!isWait),isSel=isSD&&h?.sel?.includes(oid);
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
-    let badge='';if(h){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
+    let badge='';if(h&&!isWait){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
     seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''}</div></div>`;
+      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
@@ -678,6 +679,7 @@ function rActionPanel(h,me,isH,pl){
         <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award — split ${sel} ways`:'Award pot'}</button></div></div>`;
     }
   }
+  if(me&&h&&h.satOut&&h.satOut.includes(me.seat))return`<div class="hm">You joined mid-hand — you’ll be dealt in on the next hand.</div>`;
   if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
     const mb=(h.bets||{})[me.seat]||0,tc=h.currentBet-mb,cc=tc===0,mn=h.currentBet+(h.lastRaise||G.config.bigBlind),mx=mb+me.chips;
     return`<div class="ab"><button class="btn-fold" onclick="doBet('fold')">Fold</button>
@@ -714,7 +716,7 @@ window.showSeatModal=function(sn){
   document.body.appendChild(div);
   const inp=document.getElementById('snin');setTimeout(()=>inp?.focus(),50);
   const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;
-    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(sn))G.hand.folded.push(sn);toast(nm+' sat at seat '+sn);broadcast()}
+    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(sn)){G.hand.folded.push(sn);(G.hand.satOut=G.hand.satOut||[]).push(sn)}toast(nm+' sat at seat '+sn);broadcast()}
     else{sendToHost({type:'join',seat:sn,name:nm})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
