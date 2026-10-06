@@ -47,7 +47,7 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .schips{font-size:.55rem;color:var(--gold);font-weight:600}
 .sempty{color:var(--dim);font-size:.6rem}
 .sbadge{font-size:.48rem;font-weight:700;background:var(--gold);color:#1a1400;padding:1px 4px;border-radius:3px;margin-top:1px}
-.sbet{position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);font-size:.5rem;color:#fff;background:var(--felt);border:1px solid var(--gold);font-weight:700;padding:1px 6px;border-radius:9px;white-space:nowrap;z-index:3}
+.sbet{color:var(--green);font-weight:700}
 .ts.fold .sname{color:var(--dim);text-decoration:line-through}
 .gw{flex:1;display:flex;flex-direction:column;gap:12px;max-width:480px;margin:0 auto;width:100%;padding-bottom:220px}
 .gh{display:flex;align-items:center;justify-content:space-between;padding-block:4px}
@@ -57,7 +57,7 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .pl{font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
 .pa{font-size:1.8rem;font-weight:800;color:var(--gold)}
 .pdl{font-size:.8rem;color:var(--dim)}
-.la{text-align:center;font-size:.8rem;color:var(--dim);font-style:italic;padding:4px}
+.la{text-align:center;font-size:.85rem;color:var(--text);font-weight:600;padding:6px 4px}
 .ap{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:10}
 .ab{display:flex;gap:8px}.ab button{flex:1}
 .rr{display:flex;gap:8px;align-items:center}
@@ -422,7 +422,7 @@ function advanceRound(){
     if(nr==='showdown'){h.round='showdown';h.status='showdown';h.pots=computePots(h);h.potIdx=0;resolveAutoPots(h);if(h.status==='showdown')h.lastAction='Showdown — host taps the winner';broadcast();return}
     const canBet=activePlayers().filter(p=>!h.folded.includes(p.seat)&&!h.allIn.includes(p.seat));
     h.round=nr;h.currentBet=0;h.lastRaise=G.config.bigBlind;h.lastAction=RL[nr];
-    if(canBet.length>=2){h.currentSeat=nextSeat(h.dealerSeat,canBet);h.status='betting';broadcast();return}
+    if(canBet.length>=2){h.currentSeat=nextSeat(h.dealerSeat,canBet);h.status='betting';const fa=playerBySeat(h.currentSeat);h.lastAction='🃏 '+RL[nr]+' is out — '+(fa?fa.name:'player')+' to act';broadcast();return}
     // <2 players can bet → reveal the next street automatically (loop continues).
   }
 }
@@ -642,7 +642,7 @@ function rGame(app){
     let badge='';if(h&&!isWait){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
     seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}</span>${badge}${bet?`<span class="sbet">↑${bet}</span>`:''}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
+      <div class="tsi ${isSD?'ck':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
