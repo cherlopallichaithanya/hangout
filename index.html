@@ -126,6 +126,7 @@ let client=null;        // MQTT connection to the public broker
 let joinTimer=null;     // watchdog: if no room state arrives, the room isn't there
 let undoStack=[];       // host-only: state snapshots for multi-level undo
 let arrangeMode=false,arrangeSel=null;   // host-only: manual seat arrangement (lobby)
+let hbTimer=null,lastSeen=0,hostGone=false,lastStateStr='';   // host heartbeat + player-side host-loss detection
 // Free public MQTT broker over secure WebSocket — no account, works on any network/phone/browser.
 const BROKER='wss://broker.emqx.io:8084/mqtt';
 const TOPIC_NS='hangout/v1';                   // namespace so we don't clash with other broker users
@@ -165,6 +166,11 @@ function syncScreen(){
 
 // Player adopts the authoritative state the host published.
 function applyState(d){
+  lastSeen=Date.now();                               // we just heard from the host → it's alive
+  const str=JSON.stringify([d.config,d.players,d.hand,d.cardDraw,d.roomId]);
+  const wasGone=hostGone;hostGone=false;
+  if(str===lastStateStr){if(wasGone)render();return} // heartbeat with no change → don't disrupt the UI
+  lastStateStr=str;
   G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
   syncScreen();render();
 }
@@ -231,7 +237,7 @@ function mqttConnect(onReady){
 function cleanupNet(){
   try{if(client&&client.connected&&G.isHost&&G.roomId)client.publish(topicState(G.roomId),'',{qos:1,retain:true})}catch(e){}
   try{if(client)client.end(true)}catch(e){}
-  client=null;clearTimeout(joinTimer);undoStack=[];
+  client=null;clearTimeout(joinTimer);undoStack=[];clearInterval(hbTimer);hbTimer=null;
 }
 
 // Host-only multi-level undo: snapshot the full game state before each committing action.
@@ -277,6 +283,10 @@ function hostConnect(){
   });
   // If we can't reach the broker, the room is invisible to everyone — say so clearly.
   setTimeout(()=>{if(!(client&&client.connected))toast('Can’t reach the game server on this network — try other WiFi or mobile data')},10000);
+  // Heartbeat: re-publish state every 5s (silently, no re-render) so players can tell the host is alive.
+  clearInterval(hbTimer);hbTimer=setInterval(()=>{
+    if(G.isHost&&client&&client.connected){const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};try{client.publish(topicState(G.roomId),JSON.stringify(msg),{qos:1,retain:true})}catch(e){}}
+  },5000);
 }
 
 // Restore an in-progress table after the host refreshes/reopens the tab, using the retained state.
@@ -638,6 +648,7 @@ function rLobby(app){
         <button class="btn-g" onclick="toggleArrange()" style="width:100%;max-width:300px">✓ Done Arranging</button>`
       :`
         ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
+        ${!isH&&G.config?`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.7rem;color:var(--dim)">Take over as host</button>`:''}
         ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Random Draw for Seats</button>`:''}
         ${isH&&pc>=1?`<button class="btn-o" onclick="toggleArrange()" style="width:100%;max-width:300px">🔀 Arrange Seats Manually</button>`:''}
         ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
@@ -668,7 +679,8 @@ function rGame(app){
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
-    <div class="gh"><span class="hn">Room ${G.roomId}</span>${isH?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.7rem;padding:4px 12px">↩ Undo</button>`:''}<span class="hn">${hnd}</span></div>
+    ${hostGone&&!isH?`<div class="arrbanner" style="border-color:var(--red);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap">⚠ Host seems to have left. <button class="btn-g btn-sm" onclick="becomeHost()">Take over as host</button></div>`:''}
+    <div class="gh"><span class="hn">Room ${G.roomId}</span>${isH?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.7rem;padding:4px 12px">↩ Undo</button>`:`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.66rem;padding:4px 8px;color:var(--dim)">Host?</button>`}<span class="hn">${hnd}</span></div>
     <div class="ptc"><div class="pf"><div class="felt-center">
       <div class="felt-round">${h?RL[h.round]||h.round:'Waiting'}</div>
       <div class="felt-pot">${pot}</div>
@@ -763,6 +775,19 @@ window.arrangeTap=(sn)=>{
   G.cardDraw=null;                                     // manual arrangement supersedes any random draw
   arrangeSel=null;broadcast();
 };
+// A player takes over authority (e.g. the host left). Re-establishes the room from their known state.
+window.becomeHost=()=>{
+  if(G.isHost)return;
+  if(!G.config){toast('No game state yet — can’t take over');return}
+  if(!confirm('Take over as host? Do this only if the host has left. You’ll run the table from here.'))return;
+  try{if(client)client.end(true)}catch(e){}
+  client=null;clearTimeout(joinTimer);undoStack=[];
+  G.isHost=true;                 // keep our own player id/seat; we just gain authority
+  saveSession();
+  hostConnect();                 // subscribe to actions + (re)publish our state as the retained room state
+  toast('You are now the host');
+  render();
+};
 window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
@@ -788,8 +813,8 @@ window.confirmRebuy=function(amt){
   document.getElementById('rbno').onclick=()=>div.remove();
   document.getElementById('rbyes').onclick=()=>{div.remove();doRebuy(amt)};
 };
-window.doReset=()=>{cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
-window.doNewGame=()=>{cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';render()};
+window.doReset=()=>{if(G.isHost&&!confirm('End this table for EVERYONE and start fresh? Chips and the current game will be lost. (To just change seats, use “Arrange Seats Manually” instead.)'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
+window.doNewGame=()=>{if(!confirm('Leave this table and go to the start screen?'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';render()};
 
 // On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
 (function(){
@@ -799,6 +824,10 @@ window.doNewGame=()=>{cleanupNet();clearSession();arrangeMode=false;arrangeSel=n
 })();
 // Warn before an accidental refresh/close during an active hand.
 window.addEventListener('beforeunload',e=>{if(G.screen==='game'&&G.hand&&G.hand.status!=='complete'){e.preventDefault();e.returnValue=''}});
+// Player watchdog: if no state heard from the host for ~16s, flag host as gone and offer takeover.
+setInterval(()=>{
+  if(G.config&&!G.isHost&&lastSeen&&(Date.now()-lastSeen>16000)&&!hostGone){hostGone=true;render()}
+},5000);
 </script>
 </body>
 </html>
