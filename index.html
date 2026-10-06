@@ -38,7 +38,7 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .felt-potd{font-size:.72rem;color:rgba(255,255,255,.75);font-weight:600}
 .felt-potl{font-size:.52rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.55)}
 .ts{position:absolute;transform:translate(-50%,-50%);z-index:2}
-.tsi{background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--r);padding:6px 5px;min-width:58px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px}
+.tsi{position:relative;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--r);padding:6px 5px;min-width:58px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:1px}
 .tsi.ck{cursor:pointer}.tsi.ck:active{border-color:var(--gold);background:var(--s2)}
 .ts.occ .tsi{border-style:solid}.ts.me .tsi{border-color:var(--gold);background:var(--gold-dim)}
 .ts.act .tsi{border-color:var(--gold);box-shadow:0 0 12px rgba(201,160,51,.4)}
@@ -47,7 +47,7 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 .schips{font-size:.55rem;color:var(--gold);font-weight:600}
 .sempty{color:var(--dim);font-size:.6rem}
 .sbadge{font-size:.48rem;font-weight:700;background:var(--gold);color:#1a1400;padding:1px 4px;border-radius:3px;margin-top:1px}
-.sbet{font-size:.5rem;color:var(--green);font-weight:600;margin-top:1px}
+.sbet{position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);font-size:.5rem;color:#fff;background:var(--felt);border:1px solid var(--gold);font-weight:700;padding:1px 6px;border-radius:9px;white-space:nowrap;z-index:3}
 .ts.fold .sname{color:var(--dim);text-decoration:line-through}
 .gw{flex:1;display:flex;flex-direction:column;gap:12px;max-width:480px;margin:0 auto;width:100%;padding-bottom:220px}
 .gh{display:flex;align-items:center;justify-content:space-between;padding-block:4px}
@@ -177,14 +177,19 @@ function handlePlayerMsg(data,connId){
   }else if(data.type==='bet'){
     processBet(connId,data.action,data.amount);
   }else if(data.type==='rebuy'){
-    const p=G.players[connId];
-    if(p){
-      p.chips+=G.config.buyInDollars*G.config.chipRatio;
-      p.totalBuyIn+=G.config.buyInDollars;
-      toast(p.name+' re-bought');
-      broadcast();
-    }
+    processRebuy(connId,data.amount);
   }
+}
+
+// Re-buy is host-authoritative: only between hands, only when short (<50), and capped at 200 chips.
+function processRebuy(playerId,chips){
+  const p=G.players[playerId];if(!p)return;
+  if(G.hand&&G.hand.status!=='complete'){toast('Re-buy only between hands');return}
+  if(p.chips>=50){toast('Re-buy only when under 50 chips');return}
+  const amt=chips===200?200:100;   // only 100 or 200 allowed
+  p.chips+=amt;p.totalBuyIn+=amt/G.config.chipRatio;
+  toast(p.name+' re-bought '+amt+' chips');
+  broadcast();
 }
 
 // Connect to the broker with a unique client id; calls onReady(client) on every (re)connect.
@@ -501,7 +506,7 @@ function rGame(app){
       <div class="felt-potl">Pot</div>
     </div></div>${seats}</div>
     ${h?.lastAction?`<div class="la">${esc(h.lastAction)}</div>`:''}
-    ${me?`<div style="text-align:center"><button class="btn-o btn-sm" onclick="doRebuy()">Re-buy ($${G.config.buyInDollars})</button></div>`:''}
+    ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<div style="text-align:center"><button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy (low on chips)</button></div>`:''}
   </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
   const sl=document.getElementById('rsl'),ni=document.getElementById('ramt');
   if(sl&&ni){sl.oninput=()=>{ni.value=sl.value};ni.oninput=()=>{sl.value=ni.value}}
@@ -560,7 +565,29 @@ window.showSeatModal=function(sn){
 };
 window.doLeave=()=>{clearSession();if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
-window.doRebuy=()=>{if(G.isHost){const m=G.players[G.myId];if(m){m.chips+=G.config.buyInDollars*G.config.chipRatio;m.totalBuyIn+=G.config.buyInDollars;toast(m.name+' re-bought');broadcast()}}else sendToHost({type:'rebuy'})};
+window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
+// Step 1: pick re-buy amount (100 or 200 chips).
+window.showRebuyModal=function(){
+  const old=document.getElementById('rbmod');if(old)old.remove();
+  const cr=G.config.chipRatio;
+  const div=document.createElement('div');div.id='rbmod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Re-buy</h3>
+    <div style="font-size:.82rem;color:var(--dim);text-align:center">How many chips to add? (max 200)</div>
+    <div class="mbs"><button class="btn-o" data-amt="100">100 chips<br><small>$${(100/cr).toFixed(0)}</small></button>
+      <button class="btn-o" data-amt="200">200 chips<br><small>$${(200/cr).toFixed(0)}</small></button></div>
+    <button class="btn-o btn-sm" onclick="document.getElementById('rbmod').remove()">Cancel</button></div>`;
+  document.body.appendChild(div);
+  div.querySelectorAll('button[data-amt]').forEach(b=>b.onclick=()=>confirmRebuy(+b.getAttribute('data-amt')));
+};
+// Step 2: confirm Yes/No before adding chips.
+window.confirmRebuy=function(amt){
+  const div=document.getElementById('rbmod');if(!div)return;
+  div.querySelector('.mb').innerHTML=`<h3>Confirm Re-buy</h3>
+    <div style="text-align:center;font-size:.9rem">Add <b style="color:var(--gold)">${amt} chips</b> to your stack?</div>
+    <div class="mbs"><button class="btn-o" id="rbno">No</button><button class="btn-g" id="rbyes">Yes</button></div>`;
+  document.getElementById('rbno').onclick=()=>div.remove();
+  document.getElementById('rbyes').onclick=()=>{div.remove();doRebuy(amt)};
+};
 window.doReset=()=>{cleanupNet();clearSession();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
 window.doNewGame=()=>{cleanupNet();clearSession();G.screen='home';render()};
 
