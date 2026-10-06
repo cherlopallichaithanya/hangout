@@ -495,6 +495,7 @@ function awardCurrentPot(){
   h.lastAction=(n>1?names.join(' & ')+' split '+pot.amount:names[0]+' wins '+pot.amount)+(h.pots.length>1?' (pot '+(h.potIdx+1)+'/'+h.pots.length+')':'');
   toast(h.lastAction);
   h.sel=[];h.potIdx++;resolveAutoPots(h);
+  if(h.status==='showdown'){const np=h.pots[h.potIdx];if(np)toast('Now award side pot '+h.potIdx+' ('+np.amount+' chips) to the best remaining hand')}
   broadcast();
 }
 // Minimal who-pays-whom to settle the session (greedy match of biggest debtor ↔ biggest creditor).
