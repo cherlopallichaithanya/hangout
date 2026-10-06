@@ -88,7 +88,7 @@ button{font-family:inherit;cursor:pointer;border:none}input{font-family:inherit}
 <body>
 <div id="app"></div>
 <div id="toast" class="toast"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
 <script>
 // ===== CONSTANTS =====
 const SEATS=[1,2,3,4,5,6,7,8,9,10],ROUNDS=['preflop','flop','turn','river','showdown'];
@@ -100,16 +100,13 @@ const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.inn
 const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50-48*Math.cos(a),top:50+44*Math.sin(a)}};
 
 // ===== STATE =====
-let peer=null, conns=[], hostConn=null;
-// Shared PeerJS options: STUN for NAT discovery + free public TURN relays so
-// players on different networks (e.g. cellular vs. host's WiFi) can still connect.
-const PEER_OPTS={debug:0,config:{iceServers:[
-  {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun1.l.google.com:19302'},
-  {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
-]}};
+let client=null;        // MQTT connection to the public broker
+let joinTimer=null;     // watchdog: if no room state arrives, the room isn't there
+// Free public MQTT broker over secure WebSocket — no account, works on any network/phone/browser.
+const BROKER='wss://broker.emqx.io:8084/mqtt';
+const TOPIC_NS='hangout/v1';                   // namespace so we don't clash with other broker users
+const topicState=r=>TOPIC_NS+'/'+r+'/state';   // host publishes full game state here (retained)
+const topicAction=r=>TOPIC_NS+'/'+r+'/action'; // players publish their actions here
 let G={
   screen:'home',roomId:null,myId:null,myName:'',isHost:false,
   config:null,players:{},hand:null,cardDraw:null,
@@ -119,14 +116,30 @@ let G={
 let tt;
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2500)}
 
-// ===== P2P NETWORKING =====
+// ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
 
+// Map the shared game status to the right screen for THIS client (host and players alike).
+function syncScreen(){
+  const st=G.config?.status;if(!st)return;
+  if(st==='lobby'&&G.screen!=='lobby'&&G.screen!=='home'&&G.screen!=='join')G.screen='lobby';
+  if(st==='playing'&&G.screen==='lobby')G.screen='game';
+  if(st==='ended')G.screen='results';
+}
+
+// Player adopts the authoritative state the host published.
+function applyState(d){
+  G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
+  syncScreen();render();
+}
+
 function broadcast(){
-  // Host sends full state to all players
-  const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};
-  conns.forEach(c=>{try{c.send(msg)}catch(e){}});
-  render();
+  // Host publishes full state, retained so anyone joining later receives it instantly.
+  if(client&&client.connected){
+    const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};
+    try{client.publish(topicState(G.roomId),JSON.stringify(msg),{qos:1,retain:true})}catch(e){}
+  }
+  syncScreen();render();
 }
 
 function handlePlayerMsg(data,connId){
@@ -158,6 +171,23 @@ function handlePlayerMsg(data,connId){
   }
 }
 
+// Connect to the broker with a unique client id; calls onReady(client) on every (re)connect.
+function mqttConnect(onReady){
+  const cid='hangout_'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);
+  const c=mqtt.connect(BROKER,{clientId:cid,clean:true,reconnectPeriod:2000,connectTimeout:8000,keepalive:30});
+  c.on('reconnect',()=>toast('Reconnecting…'));
+  c.on('error',e=>{console.error(e)});
+  c.on('connect',()=>onReady(c));
+  return c;
+}
+
+// Tear down the connection; host also clears the retained room state so it can't linger.
+function cleanupNet(){
+  try{if(client&&client.connected&&G.isHost&&G.roomId)client.publish(topicState(G.roomId),'',{qos:1,retain:true})}catch(e){}
+  try{if(client)client.end(true)}catch(e){}
+  client=null;clearTimeout(joinTimer);
+}
+
 function createHost(config){
   G.roomId=genCode();
   G.isHost=true;
@@ -167,82 +197,50 @@ function createHost(config){
   G.hand=null;
   G.cardDraw=null;
 
-  peer=new Peer('PKRN_'+G.roomId,PEER_OPTS);
-  // If the signaling socket drops (e.g. host's phone backgrounds the tab),
-  // re-register the same room ID so friends can still find the room.
-  peer.on('disconnected',()=>{toast('Reconnecting room…');try{peer.reconnect()}catch(e){}});
-  peer.on('open',()=>{
-    toast('Room '+G.roomId+' created!');
-    // Host auto-sits seat 1
-    G.players['host']={id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true};
-    G.screen='lobby';
-    render();
-  });
-  peer.on('connection',conn=>{
-    conns.push(conn);
-    conn.on('data',d=>handlePlayerMsg(d,conn.peer));
-    conn.on('close',()=>{
-      conns=conns.filter(c=>c!==conn);
-      // Don't remove player on temporary disconnect — they might reconnect
-    });
-    // Send current state to new joiner
-    conn.on('open',()=>{
-      conn.send({type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId});
+  client=mqttConnect(c=>{
+    // On first connect (and any reconnect) subscribe to actions and (re)publish table state.
+    c.subscribe(topicAction(G.roomId),{qos:1},()=>{
+      if(!G.players['host']){
+        toast('Room '+G.roomId+' created!');
+        // Host auto-sits seat 1
+        G.players['host']={id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true};
+        G.screen='lobby';
+      }
+      broadcast();
     });
   });
-  peer.on('error',e=>{
-    if(e.type==='unavailable-id'){toast('Room code taken — try again');G.screen='home';render();}
-    else{toast('Connection error: '+e.type);console.error(e);}
+  client.on('message',(topic,payload)=>{
+    if(topic!==topicAction(G.roomId))return;
+    let data;try{data=JSON.parse(payload.toString())}catch(e){return}
+    if(!data||data.from==='host')return;
+    handlePlayerMsg(data,data.from);
   });
 }
 
 function joinRoom(code){
   G.roomId=code.toUpperCase();
   G.isHost=false;
-  G.myId=null;
-  let tries=0,maxTries=10,connected=false;
-  peer=new Peer(undefined,PEER_OPTS);
-
-  function wireConn(c){
-    hostConn=c;let opened=false;
-    c.on('open',()=>{opened=true;connected=true;toast('Connected to room '+G.roomId)});
-    c.on('data',d=>{
-      if(d.type==='state'){
-        G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
-        // Update screen based on status
-        if(G.config?.status==='lobby'&&G.screen!=='lobby'){G.screen='lobby'}
-        if(G.config?.status==='playing'&&G.screen==='lobby'){G.screen='game'}
-        if(G.config?.status==='ended'){G.screen='results'}
-        render();
-      }
-    });
-    // Only retry on a drop that happened after we were actually connected.
-    c.on('close',()=>{if(opened){connected=false;toast('Lost host — reconnecting…');setTimeout(tryConnect,1500)}});
-    c.on('error',e=>{console.error(e)});
-  }
-  function tryConnect(){
-    if(connected||!peer||peer.destroyed||peer.disconnected)return;
-    tries++;
-    wireConn(peer.connect('PKRN_'+G.roomId,{reliable:true}));
-  }
-
-  peer.on('open',id=>{G.myId=id;tryConnect()});
-  // Re-register our own peer if the signaling socket drops, then retry the host.
-  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
-  peer.on('error',e=>{
-    if(e.type==='peer-unavailable'){
-      // Host may still be registering, or briefly offline — keep trying before giving up.
-      if(tries<maxTries){toast('Looking for room… ('+tries+'/'+maxTries+')');setTimeout(tryConnect,1500)}
-      else{toast('Room not found — check the code and that the host’s tab is open');G.screen='home';render()}
-    }else{toast('Error: '+e.type);console.error(e)}
+  G.myId='p_'+Math.random().toString(36).slice(2,10);
+  G.screen='lobby';render();
+  client=mqttConnect(c=>{
+    c.subscribe(topicState(G.roomId),{qos:1});
+    // If no retained state arrives, the room doesn't exist or the host is offline.
+    clearTimeout(joinTimer);
+    joinTimer=setTimeout(()=>{
+      if(!G.config){toast('Room not found — check the code and that the host’s tab is open');G.screen='home';render()}
+    },9000);
   });
-  G.screen='lobby';
-  render();
+  client.on('message',(topic,payload)=>{
+    if(topic!==topicState(G.roomId))return;
+    let d;try{d=JSON.parse(payload.toString())}catch(e){return}
+    if(d&&d.type==='state'){clearTimeout(joinTimer);applyState(d)}
+  });
 }
 
 function sendToHost(msg){
   if(G.isHost){handlePlayerMsg(msg,G.myId);return}
-  if(hostConn?.open)hostConn.send(msg);else toast('Not connected');
+  if(client&&client.connected)client.publish(topicAction(G.roomId),JSON.stringify({...msg,from:G.myId}),{qos:1});
+  else toast('Not connected');
 }
 
 // ===== GAME LOGIC (runs on host only) =====
@@ -534,8 +532,8 @@ window.showSeatModal=function(sn){
 window.doLeave=()=>{if(G.isHost){delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=()=>{if(G.isHost){const m=G.players[G.myId];if(m){m.chips+=G.config.buyInDollars*G.config.chipRatio;m.totalBuyIn+=G.config.buyInDollars;toast(m.name+' re-bought');broadcast()}}else sendToHost({type:'rebuy'})};
-window.doReset=()=>{if(peer)peer.destroy();peer=null;conns=[];hostConn=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
-window.doNewGame=()=>{if(peer)peer.destroy();peer=null;conns=[];hostConn=null;G.screen='home';render()};
+window.doReset=()=>{cleanupNet();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
+window.doNewGame=()=>{cleanupNet();G.screen='home';render()};
 
 render();
 </script>
