@@ -107,7 +107,8 @@ const RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'],SUITS=['♣',
 const RV={2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,J:11,Q:12,K:13,A:14},SV={'♣':1,'♦':2,'♥':3,'♠':4};
 const cv=(r,s)=>RV[r]*10+SV[s], isRed=s=>s==='♥'||s==='♦';
 const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
-const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50-48*Math.cos(a),top:50+44*Math.sin(a)}};
+// Seats laid out so the NEXT seat (higher number = next to act) sits to the LEFT, i.e. action moves left like real poker.
+const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50+48*Math.cos(a),top:50+44*Math.sin(a)}};
 
 // ===== STATE =====
 let client=null;        // MQTT connection to the public broker
@@ -175,6 +176,8 @@ function handlePlayerMsg(data,connId){
       if(taken)return;
       pushUndo();
       G.players[connId]={id:connId,name:data.name,seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
+      // Joining mid-hand: sit out the current hand (fold their seat); they play from the next deal.
+      if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(data.seat))G.hand.folded.push(data.seat);
       toast(data.name+' sat at seat '+data.seat);
       broadcast();
     }
@@ -631,7 +634,7 @@ function rGame(app){
   let seats='';
   for(let i=0;i<SEATS.length;i++){
     const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
-    if(!occ){seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi"><span class="sn">S${sn}</span><span class="sempty">—</span></div></div>`;continue}
+    if(!occ){const canSit=!me;seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
     const[oid,op]=occ,isFold=h?.folded?.includes(sn),isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold),isSel=isSD&&h?.sel?.includes(oid);
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
@@ -711,7 +714,7 @@ window.showSeatModal=function(sn){
   document.body.appendChild(div);
   const inp=document.getElementById('snin');setTimeout(()=>inp?.focus(),50);
   const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;
-    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};toast(nm+' sat at seat '+sn);broadcast()}
+    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(sn))G.hand.folded.push(sn);toast(nm+' sat at seat '+sn);broadcast()}
     else{sendToHost({type:'join',seat:sn,name:nm})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
