@@ -102,6 +102,7 @@ button{transition:transform .08s ease,box-shadow .15s ease,opacity .15s ease,bac
 .settle-h{font-size:.8rem;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:.1em;text-align:center;padding-bottom:4px;border-bottom:1px solid var(--border)}
 .settle-row{display:flex;justify-content:space-between;align-items:center;font-size:.9rem;color:var(--text);gap:10px}
 .settle-row b{color:var(--green);white-space:nowrap}
+.arrbanner{font-size:.82rem;color:var(--bright);background:var(--gold-dim);border:1px solid var(--gold);border-radius:var(--r);padding:9px 12px;text-align:center;max-width:320px;line-height:1.35}
 @media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}}
 </style>
 </head>
@@ -124,6 +125,7 @@ const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50+48*Math.cos
 let client=null;        // MQTT connection to the public broker
 let joinTimer=null;     // watchdog: if no room state arrives, the room isn't there
 let undoStack=[];       // host-only: state snapshots for multi-level undo
+let arrangeMode=false,arrangeSel=null;   // host-only: manual seat arrangement (lobby)
 // Free public MQTT broker over secure WebSocket — no account, works on any network/phone/browser.
 const BROKER='wss://broker.emqx.io:8084/mqtt';
 const TOPIC_NS='hangout/v1';                   // namespace so we don't clash with other broker users
@@ -531,7 +533,7 @@ function drawCards(){
 }
 
 function reshuffleSeats(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Reshuffle!');broadcast();setTimeout(()=>drawCards(),500)}
-function startGame(){pushUndo();G.config.status='playing';broadcast()}
+function startGame(){pushUndo();arrangeMode=false;arrangeSel=null;G.config.status='playing';broadcast()}
 function endGame(){pushUndo();G.config.status='ended';broadcast()}
 function backToLobby(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
 
@@ -598,7 +600,11 @@ function rLobby(app){
     const isMe=occ&&occ[0]===G.myId;
     let cls='ts';if(occ)cls+=' occ';if(isMe)cls+=' me';
     let inner='';
-    if(occ){
+    if(arrangeMode&&G.isHost){
+      const sel=occ&&occ[0]===arrangeSel?'winsel':'';
+      if(occ){const[oid,op]=occ;inner=`<div class="tsi ck ${sel}" onclick="arrangeTap(${sn})"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span></div>`;}
+      else{inner=`<div class="tsi ck" onclick="arrangeTap(${sn})"><span class="sn">S${sn}</span><span class="sempty">${arrangeSel?'Place':'—'}</span></div>`;}
+    }else if(occ){
       const[oid,op]=occ;let badge='';
       if(cd?.done&&cd.seating){const s=cd.seating[oid];if(s===1)badge='<span class="sbadge">D</span>';else if(s===2)badge='<span class="sbadge">SB</span>';else if(s===3&&pc>2)badge='<span class="sbadge">BB</span>'}
       inner=`<div class="tsi"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span>${badge}</div>`;
@@ -627,12 +633,17 @@ function rLobby(app){
     <div class="ptc"><div class="pf"><span class="fl">Hangout</span></div>${seats}</div>
     ${cdHtml}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
-      ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
-      ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Draw for Seats</button>`:''}
-      ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
-      ${isH&&pc<2?`<p style="color:var(--dim);font-size:.85rem">Need at least 2 players to start</p>`:''}
-      ${isH&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.72rem">↩ Undo</button>`:''}
-      ${isH?`<button class="btn-o btn-sm" onclick="doReset()" style="margin-top:6px;font-size:.72rem;color:var(--dim)">⚙ New Table</button>`:''}
+      ${arrangeMode&&isH?`
+        <div class="arrbanner">${arrangeSel?('Tap a seat to place <b>'+esc(G.players[arrangeSel]?.name||'')+'</b> (swaps if taken)'):'Tap a player, then tap a seat to move or swap them.'}</div>
+        <button class="btn-g" onclick="toggleArrange()" style="width:100%;max-width:300px">✓ Done Arranging</button>`
+      :`
+        ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
+        ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Random Draw for Seats</button>`:''}
+        ${isH&&pc>=1?`<button class="btn-o" onclick="toggleArrange()" style="width:100%;max-width:300px">🔀 Arrange Seats Manually</button>`:''}
+        ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
+        ${isH&&pc<2?`<p style="color:var(--dim);font-size:.85rem">Need at least 2 players to start</p>`:''}
+        ${isH&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.72rem">↩ Undo</button>`:''}
+        ${isH?`<button class="btn-o btn-sm" onclick="doReset()" style="margin-top:6px;font-size:.72rem;color:var(--dim)">⚙ New Table</button>`:''}`}
     </div>
   </div></div>`;
 }
@@ -738,6 +749,20 @@ window.showSeatModal=function(sn){
     else{sendToHost({type:'join',seat:sn,name:nm})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
+// Manual seat arrangement (host, lobby only): tap a player, then tap a seat to move/swap. Chips kept.
+window.toggleArrange=()=>{if(!G.isHost)return;arrangeMode=!arrangeMode;arrangeSel=null;render()};
+window.arrangeTap=(sn)=>{
+  if(!G.isHost||!arrangeMode)return;
+  const occ=Object.values(G.players).find(p=>p.seat===sn);
+  if(arrangeSel==null){if(occ){arrangeSel=occ.id;render()}return}
+  const sel=G.players[arrangeSel];
+  if(!sel){arrangeSel=null;render();return}
+  if(sel.seat===sn){arrangeSel=null;render();return}   // tapped same seat → deselect
+  pushUndo();
+  if(occ){const t=occ.seat;occ.seat=sel.seat;sel.seat=sn}else{sel.seat=sn}   // swap or move
+  G.cardDraw=null;                                     // manual arrangement supersedes any random draw
+  arrangeSel=null;broadcast();
+};
 window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
@@ -763,8 +788,8 @@ window.confirmRebuy=function(amt){
   document.getElementById('rbno').onclick=()=>div.remove();
   document.getElementById('rbyes').onclick=()=>{div.remove();doRebuy(amt)};
 };
-window.doReset=()=>{cleanupNet();clearSession();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
-window.doNewGame=()=>{cleanupNet();clearSession();G.screen='home';render()};
+window.doReset=()=>{cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
+window.doNewGame=()=>{cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';render()};
 
 // On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
 (function(){
