@@ -193,21 +193,16 @@ function createHost(config){
   G.isHost=true;
   G.config={...config,status:'lobby'};
   G.myId='host';
-  G.players={};
+  // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
+  G.players={'host':{id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true}};
   G.hand=null;
   G.cardDraw=null;
+  G.screen='lobby';
+  render();
 
   client=mqttConnect(c=>{
-    // On first connect (and any reconnect) subscribe to actions and (re)publish table state.
-    c.subscribe(topicAction(G.roomId),{qos:1},()=>{
-      if(!G.players['host']){
-        toast('Room '+G.roomId+' created!');
-        // Host auto-sits seat 1
-        G.players['host']={id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true};
-        G.screen='lobby';
-      }
-      broadcast();
-    });
+    // On first connect (and every reconnect) subscribe to actions and (re)publish table state.
+    c.subscribe(topicAction(G.roomId),{qos:1},()=>{toast('Room '+G.roomId+' live!');broadcast()});
   });
   client.on('message',(topic,payload)=>{
     if(topic!==topicAction(G.roomId))return;
@@ -215,6 +210,8 @@ function createHost(config){
     if(!data||data.from==='host')return;
     handlePlayerMsg(data,data.from);
   });
+  // If we can't reach the broker, the room is invisible to everyone — say so clearly.
+  setTimeout(()=>{if(!(client&&client.connected))toast('Can’t reach the game server on this network — try other WiFi or mobile data')},10000);
 }
 
 function joinRoom(code){
@@ -227,7 +224,11 @@ function joinRoom(code){
     // If no retained state arrives, the room doesn't exist or the host is offline.
     clearTimeout(joinTimer);
     joinTimer=setTimeout(()=>{
-      if(!G.config){toast('Room not found — check the code and that the host’s tab is open');G.screen='home';render()}
+      if(!G.config){
+        if(client&&client.connected)toast('Room not found — check the code and that the host’s tab is open');
+        else toast('Can’t reach the game server on this network — try other WiFi or mobile data');
+        G.screen='home';render();
+      }
     },9000);
   });
   client.on('message',(topic,payload)=>{
