@@ -173,6 +173,8 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 <script>
 // ===== CONSTANTS =====
 const SEATS=[1,2,3,4,5,6,7,8,9,10],ROUNDS=['preflop','flop','turn','river','showdown'];
+const MAX_IN_HAND=10;   // only 10 players are dealt into any single hand
+function seatCount(){return (G.config&&G.config.maxSeats)?G.config.maxSeats:SEATS.length}
 const RL={preflop:'Pre-flop',flop:'Flop',turn:'Turn',river:'River',showdown:'Showdown'};
 const RANKS=['2','3','4','5','6','7','8','9','10','J','Q','K','A'],SUITS=['♣','♦','♥','♠'];
 const RV={2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,J:11,Q:12,K:13,A:14},SV={'♣':1,'♦':2,'♥':3,'♠':4};
@@ -621,25 +623,32 @@ function nextSeat(from,pl){const ss=pl.map(p=>p.seat).sort((a,b)=>a-b);if(!ss.le
 function blindSeats(ds,pl){if(pl.length===2)return{sb:ds,bb:nextSeat(ds,pl)};const sb=nextSeat(ds,pl);return{sb,bb:nextSeat(sb,pl)}}
 
 function dealHand(){
-  const pl=activePlayers().filter(p=>p.chips>0&&!p.out);   // funded players who aren't sitting out
-  if(pl.length<2){toast('Need 2+ active, funded players');return}
+  const all=activePlayers().filter(p=>p.chips>0&&!p.out).sort((a,b)=>a.seat-b.seat);   // funded, not sitting out
+  if(all.length<2){toast('Need 2+ active, funded players');return}
   pushUndo();
-  const busted=activePlayers().filter(p=>p.chips<=0||p.out).map(p=>p.seat);  // broke or sitting out → sit this hand out
-  const lastD=G.hand?.dealerSeat||0,ds=nextSeat(lastD,pl),bl=blindSeats(ds,pl);
+  const cap=Math.min(MAX_IN_HAND,all.length);          // at most 10 are dealt into a hand
+  const lastSB=G.hand?G.hand.sbSeat:null;
+  const sbSeat=(lastSB!=null)?nextSeat(lastSB,all):all[0].seat;   // small blind advances one funded seat each hand
+  // Window: `cap` players clockwise starting at the small blind — ONLY these are dealt in this hand.
+  const win=[];let cur=sbSeat;for(let k=0;k<cap;k++){win.push(cur);cur=nextSeat(cur,all)}
+  const winSet={};win.forEach(s=>winSet[s]=1);
+  const bbSeat=cap>=2?win[1]:win[0], dealerSeat=win[cap-1];
   const hn=(G.hand?.handNum||0)+1;
-  const sbP=playerBySeat(bl.sb,pl),bbP=playerBySeat(bl.bb,pl);
+  const sbP=playerBySeat(sbSeat,all),bbP=playerBySeat(bbSeat,all);
   if(!sbP||!bbP)return;
   const sbA=Math.min(G.config.smallBlind,sbP.chips),bbA=Math.min(G.config.bigBlind,bbP.chips);
   sbP.chips-=sbA;bbP.chips-=bbA;
-  const bets={};bets[bl.sb]=sbA;bets[bl.bb]=bbA;
-  const contrib={};contrib[bl.sb]=sbA;contrib[bl.bb]=bbA;   // per-seat total committed this hand (for side pots)
-  const allIn=[];if(sbP.chips===0)allIn.push(bl.sb);if(bbP.chips===0)allIn.push(bl.bb);
-  // First to act = first funded, non-all-in player after the big blind (skip blind-all-ins).
-  const canAct=pl.filter(p=>!allIn.includes(p.seat));
-  const first=canAct.length?nextSeat(bl.bb,canAct):null;
-  G.hand={handNum:hn,dealerSeat:ds,sbSeat:bl.sb,bbSeat:bl.bb,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,contrib,folded:busted,allIn,acted:[],currentSeat:first,status:'betting',lastAction:'Blinds posted',winner:null,pots:null,potIdx:0};
-  toast('Hand #'+hn+' dealt');
-  if(first==null)advanceRound();   // everyone all-in from blinds → no betting, run to showdown
+  const bets={};bets[sbSeat]=sbA;bets[bbSeat]=bbA;
+  const contrib={};contrib[sbSeat]=sbA;contrib[bbSeat]=bbA;
+  const allIn=[];if(sbP.chips===0)allIn.push(sbSeat);if(bbP.chips===0)allIn.push(bbSeat);
+  // Seated players NOT in the window (or busted/out) sit this hand out.
+  const folded=activePlayers().filter(p=>!winSet[p.seat]).map(p=>p.seat);
+  const satOut=activePlayers().filter(p=>p.chips>0&&!p.out&&!winSet[p.seat]).map(p=>p.seat);
+  // First to act: first window player after the BB who isn't all-in (wraps to SB for heads-up).
+  const bi=win.indexOf(bbSeat);let first=null;for(let k=1;k<=win.length;k++){const s=win[(bi+k)%win.length];if(!allIn.includes(s)){first=s;break}}
+  G.hand={handNum:hn,dealerSeat,sbSeat,bbSeat,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,contrib,folded,satOut,allIn,acted:[],currentSeat:first,status:'betting',lastAction:'Blinds posted',winner:null,pots:null,potIdx:0};
+  toast('Hand #'+hn+' dealt'+(all.length>cap?(' — '+cap+' of '+all.length+' playing'):''));
+  if(first==null)advanceRound();   // everyone all-in from blinds → run to showdown
   else broadcast();
 }
 
@@ -849,7 +858,8 @@ function rHome(app){
       <div class="fg"><label>Chips per Dollar</label><input type="number" id="icr" value="5" min="1"></div>
       <div class="fr"><div class="fg"><label>Small Blind</label><input type="number" id="isb" value="1" min="1"></div>
       <div class="fg"><label>Big Blind</label><input type="number" id="ibb" value="2" min="1"></div></div>
-      <div class="fg"><label>Reshuffle Every N Hands (0=off)</label><input type="number" id="ire" value="20" min="0" max="20"></div>
+      <div class="fr"><div class="fg"><label>Reshuffle Every N (0=off)</label><input type="number" id="ire" value="20" min="0" max="50"></div>
+      <div class="fg"><label>Seats at table</label><input type="number" id="ims" value="10" min="2" max="14"></div></div>
       <button type="submit" class="btn-g" style="width:100%;margin-top:4px">Create Table</button>
     </form>
     <div style="text-align:center;width:100%">
@@ -863,7 +873,8 @@ function rHome(app){
     G.myName=document.getElementById('iname').value.trim();if(!G.myName)return;
     createHost({buyInDollars:+document.getElementById('ibi').value||20,chipRatio:+document.getElementById('icr').value||5,
       smallBlind:+document.getElementById('isb').value||1,bigBlind:+document.getElementById('ibb').value||2,
-      reshuffleEvery:+document.getElementById('ire').value||0});
+      reshuffleEvery:+document.getElementById('ire').value||0,
+      maxSeats:Math.max(2,Math.min(14,+document.getElementById('ims').value||10))});
   };
 }
 
@@ -891,23 +902,23 @@ function rLobby(app){
   if(!G.config)return void(app.innerHTML=`<div class="screen active"><div class="center-wrap"><h1>Connecting…</h1><p style="color:var(--dim)">Waiting for host</p></div></div>`);
   const pl=G.players||{},pc=Object.keys(pl).length,myP=pl[G.myId],cc=G.config.buyInDollars*G.config.chipRatio,cd=G.cardDraw;
   let seats='';
-  for(let i=0;i<SEATS.length;i++){
-    const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(pl).find(([,p])=>p.seat===sn);
+  for(let i=0;i<seatCount();i++){
+    const sn=i+1,pos=seatPos(i,seatCount()),occ=Object.entries(pl).find(([,p])=>p.seat===sn);
     const isMe=occ&&occ[0]===G.myId;
     let cls='ts';if(occ)cls+=' occ';if(isMe)cls+=' me';
     let inner='';
     if(arrangeMode&&G.isHost){
       const sel=occ&&occ[0]===arrangeSel?'winsel':'';
-      if(occ){const[oid,op]=occ;inner=`<div class="tsi ck ${sel}" onclick="arrangeTap(${sn})"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span></div>`;}
-      else{inner=`<div class="tsi ck" onclick="arrangeTap(${sn})"><span class="sn">S${sn}</span><span class="sempty">${arrangeSel?'Place':'—'}</span></div>`;}
+      if(occ){const[oid,op]=occ;inner=`<div class="tsi ck ${sel}" onclick="arrangeTap(${sn})"><span class="sname">${esc(op.name)}</span></div>`;}
+      else{inner=`<div class="tsi ck" onclick="arrangeTap(${sn})"><span class="sempty">${arrangeSel?'Place':'—'}</span></div>`;}
     }else if(occ){
       const[oid,op]=occ;let badge='';
       if(cd?.done&&cd.seating){const s=cd.seating[oid];if(s===1)badge='<span class="sbadge">D</span>';else if(s===2)badge='<span class="sbadge">SB</span>';else if(s===3&&pc>2)badge='<span class="sbadge">BB</span>'}
       if(G.config&&G.config.hostId===oid)badge+='<span class="sbadge" style="background:linear-gradient(145deg,#49e08b,#13a357);color:#04210f">HOST</span>';
-      inner=`<div class="tsi"><span class="sn">S${sn}</span>${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span>${badge}</div>`;
+      inner=`<div class="tsi">${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span>${badge}</div>`;
     }else{
       const canSit=!myP;
-      inner=`<div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div>`;
+      inner=`<div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sempty">${canSit?'Sit':'—'}</span></div>`;
     }
     seats+=`<div class="${cls}" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">${inner}</div>`;
   }
@@ -953,9 +964,9 @@ function rGame(app){
   const pot=h?(h.pot||0)+Object.values(h.bets||{}).reduce((s,v)=>s+v,0):0;
   const potD=(pot/G.config.chipRatio).toFixed(2);
   let seats='';
-  for(let i=0;i<SEATS.length;i++){
-    const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
-    if(!occ){const canSit=!me;seats+=`<div class="ts" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
+  for(let i=0;i<seatCount();i++){
+    const sn=i+1,pos=seatPos(i,seatCount()),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
+    if(!occ){const canSit=!me;seats+=`<div class="ts" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
     const isWait=h?.satOut?.includes(sn);
     const[oid,op]=occ,isOut=op.out,isFold=h?.folded?.includes(sn)&&!isWait&&!isOut,isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold&&!isWait&&!isOut),isSel=isSD&&h?.sel?.includes(oid);
@@ -967,7 +978,7 @@ function rGame(app){
     const click=isSD&&isH?`onclick="toggleWinner('${oid}')"`:(canToggle?`onclick="toggleSitOut(${sn})"`:'');
     const tag=isOut?'<span style="font-size:.46rem;color:var(--dim);font-weight:700">OUT</span>':(isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''));
     seats+=`<div class="${cls}" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}><span class="sn">S${sn}</span>${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
+      <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}>${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
