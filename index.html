@@ -451,7 +451,7 @@ function handlePlayerMsg(data,connId){
     const p=G.players[connId];
     if(p){pushUndo();G.config.cashouts=G.config.cashouts||[];G.config.cashouts.push({name:p.name,chips:p.chips,totalBuyIn:p.totalBuyIn});delete G.players[connId];toast(p.name+' left ('+p.chips+' chips cashed out)');broadcast();}
   }else if(data.type==='sitout'){
-    const p=G.players[connId];if(p){pushUndo();p.out=true;p.sitHands=Math.max(1,Math.min(50,data.hands||1));toast(p.name+' sitting out '+p.sitHands+' hand(s)');broadcast();}
+    const p=G.players[connId];if(p){pushUndo();p.out=true;p.sitHands=0;toast(p.name+' sitting out');broadcast();}
   }else if(data.type==='bet'){
     processBet(connId,data.action,data.amount);
   }else if(data.type==='rebuy'){
@@ -1000,7 +1000,7 @@ function rGame(app){
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn-o btn-sm" onclick="showLedger()">📊 Standings</button>
       <button class="btn-o btn-sm" onclick="showInvite()">📤 Invite</button>
-      ${me&&!me.out?`<button class="btn-o btn-sm" onclick="sitOutPrompt()">💤 Sit out</button>`:''}
+      ${me&&!me.out?`<button class="btn-o btn-sm" onclick="sitOutMe()">💤 Sit out</button>`:''}
       ${me?`<button class="btn-o btn-sm" onclick="doLeave()">🚪 Leave</button>`:''}
       ${isH?`<span style="display:inline-flex;gap:6px;align-items:center"><button class="btn-o btn-sm" onclick="setSeats(-1)">➖</button><span style="font-size:.78rem;color:var(--dim)">Seats ${seatCount()}</span><button class="btn-o btn-sm" onclick="setSeats(1)">➕</button></span>`:''}
       ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy</button>`:''}
@@ -1177,14 +1177,7 @@ window.toggleSitOut=(seat)=>{
   pushUndo();p.out=!p.out;toast(p.name+(p.out?' sitting out':' back in'));broadcast();
 };
 window.imBack=()=>{if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=false;p.sitHands=0;broadcast()}}else sendToHost({type:'back'})};
-window.sitOutPrompt=function(){
-  const old=document.getElementById('somod');if(old){old.remove();return}
-  const opts=[1,2,3,5,10].map(n=>`<button class="btn-o" onclick="sitOutHands(${n})">${n} hand${n>1?'s':''}</button>`).join('');
-  const div=document.createElement('div');div.id='somod';div.className='mo';
-  div.innerHTML=`<div class="mb"><h3>Sit out</h3><div style="font-size:.82rem;color:var(--dim);text-align:center">Skip this many hands — you're dealt back in automatically after.</div><div class="mbs" style="flex-wrap:wrap;justify-content:center">${opts}</div><button class="btn-o btn-sm" onclick="document.getElementById('somod').remove()">Cancel</button></div>`;
-  document.body.appendChild(div);
-};
-window.sitOutHands=function(n){const m=document.getElementById('somod');if(m)m.remove();if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=true;p.sitHands=n;toast('Sitting out '+n+' hand(s)');broadcast()}}else sendToHost({type:'sitout',hands:n})};
+window.sitOutMe=function(){if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=true;p.sitHands=0;toast('Sitting out — tap I’m back to return');broadcast()}}else sendToHost({type:'sitout'})};
 window.doLeave=()=>{
   const me=G.players[G.myId],cr=(G.config&&G.config.chipRatio)||1;
   const msg=me?('Leave the table? Your '+me.chips+' chips ($'+(me.chips/cr).toFixed(2)+') will be finalized and added to the final standings & settlement.'):'Leave the table?';
