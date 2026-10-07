@@ -448,16 +448,16 @@ function handlePlayerMsg(data,connId){
       broadcast();
     }
   }else if(data.type==='leave'){
-    pushUndo();
-    delete G.players[connId];
-    toast('Player left');
-    broadcast();
+    const p=G.players[connId];
+    if(p){pushUndo();G.config.cashouts=G.config.cashouts||[];G.config.cashouts.push({name:p.name,chips:p.chips,totalBuyIn:p.totalBuyIn});delete G.players[connId];toast(p.name+' left ('+p.chips+' chips cashed out)');broadcast();}
+  }else if(data.type==='sitout'){
+    const p=G.players[connId];if(p){pushUndo();p.out=true;p.sitHands=Math.max(1,Math.min(50,data.hands||1));toast(p.name+' sitting out '+p.sitHands+' hand(s)');broadcast();}
   }else if(data.type==='bet'){
     processBet(connId,data.action,data.amount);
   }else if(data.type==='rebuy'){
     processRebuy(connId,data.amount);
   }else if(data.type==='back'){
-    const p=G.players[connId];if(p&&p.out){pushUndo();p.out=false;toast(p.name+' is back in');broadcast()}
+    const p=G.players[connId];if(p&&p.out){pushUndo();p.out=false;p.sitHands=0;toast(p.name+' is back in');broadcast()}
   }else if(data.type==='avatar'){
     const p=G.players[connId];if(p&&data.av){p.av=data.av;broadcast()}
   }else if(data.type==='host-takeover'){
@@ -528,7 +528,7 @@ window.undo=function(){
 function createHost(config){
   G.roomId=genCode();
   G.isHost=true;applyAudioDefaults(true);
-  G.config={...config,status:'lobby',expenses:[],hostId:'host',history:[]};   // expenses+hostId+history live in config so they sync automatically
+  G.config={...config,status:'lobby',expenses:[],hostId:'host',history:[],cashouts:[]};   // synced extras
   G.myId='host';
   // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
   G.players={'host':{id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true}};
@@ -648,6 +648,8 @@ function dealHand(){
   // First to act: first window player after the BB who isn't all-in (wraps to SB for heads-up).
   const bi=win.indexOf(bbSeat);let first=null;for(let k=1;k<=win.length;k++){const s=win[(bi+k)%win.length];if(!allIn.includes(s)){first=s;break}}
   G.hand={handNum:hn,dealerSeat,sbSeat,bbSeat,round:'preflop',pot:0,currentBet:bbA,lastRaise:bbA,bets,contrib,folded,satOut,allIn,acted:[],currentSeat:first,status:'betting',lastAction:'Blinds posted',winner:null,pots:null,potIdx:0};
+  // Count down timed sit-outs (they sat THIS hand; when the counter hits 0 they return next deal).
+  Object.values(G.players).forEach(p=>{if(p.out&&p.sitHands>0){p.sitHands--;if(p.sitHands<=0){p.out=false;p.sitHands=0}}});
   toast('Hand #'+hn+' dealt'+(all.length>cap?(' — '+cap+' of '+all.length+' playing'):''));
   if(first==null)advanceRound();   // everyone all-in from blinds → run to showdown
   else broadcast();
@@ -797,6 +799,7 @@ function awardCurrentPot(){
 function computeSettlement(){
   const cr=G.config.chipRatio,net={};
   Object.values(G.players).forEach(p=>{net[p.id]={name:p.name,v:(p.chips/cr)-p.totalBuyIn}});
+  (G.config.cashouts||[]).forEach((c,i)=>{net['co'+i]={name:c.name+' (left)',v:(c.chips/cr)-c.totalBuyIn}});
   (G.config.expenses||[]).forEach(e=>{
     const sh=(e.split&&e.split.length?e.split:Object.keys(G.players)).filter(id=>net[id]);
     if(!sh.length)return;
@@ -997,6 +1000,8 @@ function rGame(app){
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn-o btn-sm" onclick="showLedger()">📊 Standings</button>
       <button class="btn-o btn-sm" onclick="showInvite()">📤 Invite</button>
+      ${me&&!me.out?`<button class="btn-o btn-sm" onclick="sitOutPrompt()">💤 Sit out</button>`:''}
+      ${me?`<button class="btn-o btn-sm" onclick="doLeave()">🚪 Leave</button>`:''}
       ${isH?`<span style="display:inline-flex;gap:6px;align-items:center"><button class="btn-o btn-sm" onclick="setSeats(-1)">➖</button><span style="font-size:.78rem;color:var(--dim)">Seats ${seatCount()}</span><button class="btn-o btn-sm" onclick="setSeats(1)">➕</button></span>`:''}
       ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy</button>`:''}
     </div>
@@ -1031,7 +1036,7 @@ function rActionPanel(h,me,isH,pl){
         <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award ${cur} — split ${sel} ways`:'Award '+cur}</button></div>`:`<div class="hm">All pots awarded ✓</div>`}</div>`;
     }
   }
-  if(me&&me.out)return`<div class="hp"><div class="hm">You're sitting out.</div><div class="ab"><button class="btn-g" onclick="imBack()">I'm back — deal me in</button></div></div>`;
+  if(me&&me.out)return`<div class="hp"><div class="hm">You're sitting out${me.sitHands>0?(' — back in '+me.sitHands+' hand'+(me.sitHands>1?'s':'')):''}.</div><div class="ab"><button class="btn-g" onclick="imBack()">I'm back — deal me in</button></div></div>`;
   if(me&&h&&h.satOut&&h.satOut.includes(me.seat))return`<div class="hm">You joined mid-hand — you’ll be dealt in on the next hand.</div>`;
   if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
     const mb=(h.bets||{})[me.seat]||0,tc=h.currentBet-mb,cc=tc===0,mn=h.currentBet+(h.lastRaise||G.config.bigBlind),mx=mb+me.chips;
@@ -1056,18 +1061,20 @@ function rResults(app){
   const entries=Object.values(G.players).sort((a,b)=>b.chips-a.chips);let rows='';
   for(const p of entries){const fd=(p.chips/G.config.chipRatio).toFixed(2),pr=parseFloat(fd)-p.totalBuyIn,pc=pr>=0?'up':'down',ps=pr>=0?'+$'+pr.toFixed(2):'-$'+Math.abs(pr).toFixed(2);
     rows+=`<div class="rrow"><div><div class="rn">${esc(p.name)}</div><div class="rd">$${fd} final</div></div><div style="text-align:right"><div class="rc">${p.chips} chips</div><div class="rp ${pc}">${ps}</div></div></div>`}
+  (G.config.cashouts||[]).forEach(c=>{const fd=(c.chips/G.config.chipRatio).toFixed(2),pr=parseFloat(fd)-c.totalBuyIn,pc=pr>=0?'up':'down',ps=pr>=0?'+$'+pr.toFixed(2):'-$'+Math.abs(pr).toFixed(2);rows+=`<div class="rrow" style="opacity:.72"><div><div class="rn">${esc(c.name)} <span style="font-size:.68rem;color:var(--dim)">(left)</span></div><div class="rd">$${fd} final</div></div><div style="text-align:right"><div class="rc">${c.chips} chips</div><div class="rp ${pc}">${ps}</div></div></div>`});
   const exs=G.config.expenses||[];
   const exHtml=`<div class="settle"><div class="settle-h">Expenses</div>${exs.length?exs.map((e,i)=>{const sn=(e.split||[]).map(id=>G.players[id]?.name).filter(Boolean);const shareTxt=sn.length&&sn.length<Object.keys(G.players).length?('split: '+sn.map(esc).join(', ')):('split '+(sn.length||Object.keys(G.players).length)+' ways');return `<div class="settle-row"><span>${esc(e.desc)} · paid by ${esc(G.players[e.by]?.name||'?')}<br><span style="font-size:.72rem;color:var(--dim)">${shareTxt}</span></span><span><b>$${(+e.amount).toFixed(2)}</b>${G.isHost?` <button onclick="delExpense(${i})" style="background:none;border:none;color:var(--red);font-size:1rem;cursor:pointer;padding:0 2px">✕</button>`:''}</span></div>`}).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">No expenses added</div>`}${G.isHost?`<button class="btn-o btn-sm" onclick="showExpenseModal()" style="margin-top:6px">＋ Add food / expense</button>`:''}</div>`;
   const tx=computeSettlement();
   const settle=`<div class="settle"><div class="settle-h">Settle Up</div>${tx.length?tx.map(t=>`<div class="settle-row"><span>${esc(t.from)} pays ${esc(t.to)}</span><b>$${t.amt.toFixed(2)}</b></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">All square — no payments needed</div>`}</div>`;
   // Night highlights
   const hist=G.config.history||[],cr=G.config.chipRatio;
-  let bw=null,bwNet=-1e9;entries.forEach(p=>{const n=p.chips/cr-p.totalBuyIn;if(n>bwNet){bwNet=n;bw=p}});
-  let bp=0;hist.forEach(h=>{if(h.pot>bp)bp=h.pot});
+  let bw=null,bwNet=-1e9;entries.forEach(p=>{const n=p.chips/cr-p.totalBuyIn;if(n>bwNet){bwNet=n;bw=p.name}});
+  (G.config.cashouts||[]).forEach(c=>{const n=c.chips/cr-c.totalBuyIn;if(n>bwNet){bwNet=n;bw=c.name}});
+  let bp=0,bpw='';hist.forEach(h=>{if(h.pot>bp){bp=h.pot;bpw=(h.w||[]).join(' & ')}});
   const wc={};hist.forEach(h=>(h.w||[]).forEach(n=>wc[n]=(wc[n]||0)+1));let mw=null,mwN=0;Object.keys(wc).forEach(n=>{if(wc[n]>mwN){mwN=wc[n];mw=n}});
   const sumHtml=`<div class="settle"><div class="settle-h">The Night 🌙</div>
-    <div class="settle-row"><span>🏆 Biggest winner</span><b>${bw&&bwNet>0?esc(bw.name)+' (+$'+bwNet.toFixed(2)+')':'—'}</b></div>
-    <div class="settle-row"><span>💰 Biggest pot</span><b>${bp?bp+' chips':'—'}</b></div>
+    <div class="settle-row"><span>🏆 Biggest winner</span><b>${bw&&bwNet>0?esc(bw)+' (+$'+bwNet.toFixed(2)+')':'—'}</b></div>
+    <div class="settle-row"><span>💰 Biggest pot</span><b>${bp?bp+' chips'+(bpw?' — '+esc(bpw):''):'—'}</b></div>
     <div class="settle-row"><span>🔥 Most hands won</span><b>${mw?esc(mw)+' ('+mwN+')':'—'}</b></div>
     <div class="settle-row"><span>🃏 Hands played</span><b>${hist.length}</b></div></div>`;
   app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${sumHtml}${exHtml}${settle}
@@ -1169,8 +1176,22 @@ window.toggleSitOut=(seat)=>{
   const p=Object.values(G.players).find(x=>x.seat===seat);if(!p)return;
   pushUndo();p.out=!p.out;toast(p.name+(p.out?' sitting out':' back in'));broadcast();
 };
-window.imBack=()=>{if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=false;broadcast()}}else sendToHost({type:'back'})};
-window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
+window.imBack=()=>{if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=false;p.sitHands=0;broadcast()}}else sendToHost({type:'back'})};
+window.sitOutPrompt=function(){
+  const old=document.getElementById('somod');if(old){old.remove();return}
+  const opts=[1,2,3,5,10].map(n=>`<button class="btn-o" onclick="sitOutHands(${n})">${n} hand${n>1?'s':''}</button>`).join('');
+  const div=document.createElement('div');div.id='somod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Sit out</h3><div style="font-size:.82rem;color:var(--dim);text-align:center">Skip this many hands — you're dealt back in automatically after.</div><div class="mbs" style="flex-wrap:wrap;justify-content:center">${opts}</div><button class="btn-o btn-sm" onclick="document.getElementById('somod').remove()">Cancel</button></div>`;
+  document.body.appendChild(div);
+};
+window.sitOutHands=function(n){const m=document.getElementById('somod');if(m)m.remove();if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=true;p.sitHands=n;toast('Sitting out '+n+' hand(s)');broadcast()}}else sendToHost({type:'sitout',hands:n})};
+window.doLeave=()=>{
+  const me=G.players[G.myId],cr=(G.config&&G.config.chipRatio)||1;
+  const msg=me?('Leave the table? Your '+me.chips+' chips ($'+(me.chips/cr).toFixed(2)+') will be finalized and added to the final standings & settlement.'):'Leave the table?';
+  if(!confirm(msg))return;
+  if(G.isHost){pushUndo();if(me){G.config.cashouts=G.config.cashouts||[];G.config.cashouts.push({name:me.name,chips:me.chips,totalBuyIn:me.totalBuyIn})}delete G.players[G.myId];toast('You left your seat (chips saved)');broadcast()}
+  else{sendToHost({type:'leave'});clearSession();toast('Leaving…');setTimeout(()=>{cleanupNet();G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render()},350)}
+};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.confirmEnd=()=>{if(confirm('End the game now and go to final results & settlement? (You can Undo this on the results screen.)'))endGame()};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
@@ -1250,7 +1271,8 @@ window.showLedger=function(){
   const old=document.getElementById('ledmod');if(old){old.remove();return}
   const cr=G.config.chipRatio;
   const wins={};(G.config.history||[]).forEach(h=>(h.w||[]).forEach(n=>wins[n]=(wins[n]||0)+1));
-  const rows=Object.values(G.players).sort((a,b)=>b.chips-a.chips).map(p=>{const fd=p.chips/cr,net=fd-p.totalBuyIn,up=net>=0;return `<div class="settle-row"><span>${esc(p.av||'')} ${esc(p.name)} <span style="color:var(--dim);font-size:.75rem">🏆${wins[p.name]||0}</span></span><span><b>${p.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
+  let rows=Object.values(G.players).sort((a,b)=>b.chips-a.chips).map(p=>{const fd=p.chips/cr,net=fd-p.totalBuyIn,up=net>=0;return `<div class="settle-row"><span>${esc(p.av||'')} ${esc(p.name)} <span style="color:var(--dim);font-size:.75rem">🏆${wins[p.name]||0}</span></span><span><b>${p.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
+  rows+=(G.config.cashouts||[]).map(c=>{const net=c.chips/cr-c.totalBuyIn,up=net>=0;return `<div class="settle-row" style="opacity:.72"><span>${esc(c.name)} (left)</span><span><b>${c.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
   const div=document.createElement('div');div.id='ledmod';div.className='mo';
   div.innerHTML=`<div class="mb"><h3>Standings (live)</h3><div class="settle" style="margin-top:0">${rows}</div><button class="btn-o btn-sm" onclick="document.getElementById('ledmod').remove()">Close</button></div>`;
   document.body.appendChild(div);
