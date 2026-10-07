@@ -210,6 +210,8 @@ function handlePlayerMsg(data,connId){
     processBet(connId,data.action,data.amount);
   }else if(data.type==='rebuy'){
     processRebuy(connId,data.amount);
+  }else if(data.type==='back'){
+    const p=G.players[connId];if(p&&p.out){pushUndo();p.out=false;toast(p.name+' is back in');broadcast()}
   }
 }
 
@@ -353,10 +355,10 @@ function nextSeat(from,pl){const ss=pl.map(p=>p.seat).sort((a,b)=>a-b);if(!ss.le
 function blindSeats(ds,pl){if(pl.length===2)return{sb:ds,bb:nextSeat(ds,pl)};const sb=nextSeat(ds,pl);return{sb,bb:nextSeat(sb,pl)}}
 
 function dealHand(){
-  const pl=activePlayers().filter(p=>p.chips>0);   // only funded players are dealt in
-  if(pl.length<2){toast('Need 2+ funded players');return}
+  const pl=activePlayers().filter(p=>p.chips>0&&!p.out);   // funded players who aren't sitting out
+  if(pl.length<2){toast('Need 2+ active, funded players');return}
   pushUndo();
-  const busted=activePlayers().filter(p=>p.chips<=0).map(p=>p.seat);  // computed BEFORE blinds; seated-but-broke sit out
+  const busted=activePlayers().filter(p=>p.chips<=0||p.out).map(p=>p.seat);  // broke or sitting out → sit this hand out
   const lastD=G.hand?.dealerSeat||0,ds=nextSeat(lastD,pl),bl=blindSeats(ds,pl);
   const hn=(G.hand?.handNum||0)+1;
   const sbP=playerBySeat(bl.sb,pl),bbP=playerBySeat(bl.bb,pl);
@@ -672,12 +674,15 @@ function rGame(app){
     if(!occ){const canSit=!me;seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
     const isWait=h?.satOut?.includes(sn);
-    const[oid,op]=occ,isFold=h?.folded?.includes(sn)&&!isWait,isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold&&!isWait),isSel=isSD&&h?.sel?.includes(oid);
+    const[oid,op]=occ,isOut=op.out,isFold=h?.folded?.includes(sn)&&!isWait&&!isOut,isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold&&!isWait&&!isOut),isSel=isSD&&h?.sel?.includes(oid);
+    const canToggle=isH&&!isSD&&(!h||h.status==='complete');   // between hands, host can sit a player out / back
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
-    let badge='';if(h&&!isWait){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
+    let badge='';if(h&&!isWait&&!isOut){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
     const bet=(h?.bets||{})[sn];
+    const click=isSD&&isH?`onclick="toggleWinner('${oid}')"`:(canToggle?`onclick="toggleSitOut(${sn})"`:'');
+    const tag=isOut?'<span style="font-size:.46rem;color:var(--dim);font-weight:700">OUT</span>':(isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''));
     seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck elig':''} ${isSel?'winsel':''}" ${isSD&&isH?`onclick="toggleWinner('${oid}')"`:''}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':'')}</div></div>`;
+      <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
@@ -722,6 +727,7 @@ function rActionPanel(h,me,isH,pl){
         <div class="ab"><button class="btn-g" onclick="awardCurrentPot()">${sel>1?`Award ${cur} — split ${sel} ways`:'Award '+cur}</button></div>`:`<div class="hm">All pots awarded ✓</div>`}</div>`;
     }
   }
+  if(me&&me.out)return`<div class="hp"><div class="hm">You're sitting out.</div><div class="ab"><button class="btn-g" onclick="imBack()">I'm back — deal me in</button></div></div>`;
   if(me&&h&&h.satOut&&h.satOut.includes(me.seat))return`<div class="hm">You joined mid-hand — you’ll be dealt in on the next hand.</div>`;
   if(me&&h?.status==='betting'&&h.currentSeat===me.seat){
     const mb=(h.bets||{})[me.seat]||0,tc=h.currentBet-mb,cc=tc===0,mn=h.currentBet+(h.lastRaise||G.config.bigBlind),mx=mb+me.chips;
@@ -730,7 +736,12 @@ function rActionPanel(h,me,isH,pl){
       <button class="btn-allin" onclick="doBet('allin')">All-in<br><small>${me.chips}</small></button></div>
       ${mx>=mn?`<div class="rr"><input type="range" id="rsl" min="${mn}" max="${mx}" value="${mn}" step="${G.config.bigBlind}"><input type="number" id="ramt" value="${mn}" min="${mn}" max="${mx}"><button class="btn-g btn-sm" onclick="doBet('raise',+document.getElementById('ramt').value)">Raise</button></div>`:''}`
   }
-  if(h?.status==='betting'){const cp=playerBySeat(h.currentSeat);return`<div class="hm">Waiting for ${cp?esc(cp.name):'next player'}…</div>`}
+  if(h?.status==='betting'){
+    const cp=playerBySeat(h.currentSeat);
+    if(isH)return`<div class="hp"><div class="hm">Waiting for ${cp?esc(cp.name):'next player'}… If they stepped away, act for them:</div>
+      <div class="ab"><button class="btn-fold" onclick="hostAct('fold')">Fold</button><button class="btn-check" onclick="hostAct('checkcall')">Check / Call</button><button class="btn-o" onclick="hostSitOut()">Sit out</button></div></div>`;
+    return`<div class="hm">Waiting for ${cp?esc(cp.name):'next player'}…</div>`;
+  }
   if(!isH&&h?.status==='showdown'){const pots=h.pots||[];return`<div class="hm">Showdown — host is awarding ${pots.length>1?`pot ${(h.potIdx||0)+1}/${pots.length}`:'the pot'}…</div>`}
   if(!isH&&(!h||h.status==='complete'))return`<div class="hm">Waiting for host to deal…</div>`;
   return'';
@@ -809,6 +820,26 @@ window.becomeHost=()=>{
   },1500);
   render();
 };
+// Host acts for the current player if they've stepped away (keeps the game moving).
+window.hostAct=(action)=>{
+  if(!G.isHost||!G.hand||G.hand.status!=='betting')return;
+  const cp=Object.values(G.players).find(p=>p.seat===G.hand.currentSeat);if(!cp)return;
+  if(action==='checkcall'){const mb=(G.hand.bets||{})[cp.seat]||0;action=(G.hand.currentBet>mb)?'call':'check'}
+  processBet(cp.id,action);
+};
+// Host sits the current player out (folds them now; they're skipped on future deals until back).
+window.hostSitOut=()=>{
+  if(!G.isHost||!G.hand||G.hand.status!=='betting')return;
+  const cp=Object.values(G.players).find(p=>p.seat===G.hand.currentSeat);if(!cp)return;
+  cp.out=true;toast(cp.name+' sitting out');processBet(cp.id,'fold');
+};
+// Toggle sit-out between hands (host taps a seat). Players return via their own "I'm back" button too.
+window.toggleSitOut=(seat)=>{
+  if(!G.isHost)return;
+  const p=Object.values(G.players).find(x=>x.seat===seat);if(!p)return;
+  pushUndo();p.out=!p.out;toast(p.name+(p.out?' sitting out':' back in'));broadcast();
+};
+window.imBack=()=>{if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=false;broadcast()}}else sendToHost({type:'back'})};
 window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
