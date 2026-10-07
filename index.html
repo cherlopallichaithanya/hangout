@@ -341,7 +341,7 @@ function voiceAnnounce(){
   if(h.handNum!==_vhand){_vhand=h.handNum;_vround=null;_vact=null;say('New hand')}
   if(h.status==='betting'&&h.round!==_vround){_vround=h.round;if(h.round&&h.round!=='preflop')say(RL[h.round]||h.round)}
   if(h.status==='showdown'&&_vround!=='showdown'){_vround='showdown';say('Showdown')}
-  if(h.lastAction&&h.lastAction!==_vact){_vact=h.lastAction;const la=h.lastAction;if(/all-in/i.test(la))say('All in!');else if(/wins|split/i.test(la))say(la.replace(/[🏆🃏🔥💰💪🥊🚫😎🎬🤯🎯💢👑🦊🚀🏁🔫💼⚔️]/g,'').trim())}
+  if(h.lastAction&&h.lastAction!==_vact){_vact=h.lastAction;const la=h.lastAction;if(/all-in/i.test(la))say('All in!')}
 }
 
 // ===== SOUND (Web Audio, synthesized — no external files) =====
