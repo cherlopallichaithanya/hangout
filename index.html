@@ -117,6 +117,7 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 .suitrow .suittile:nth-child(2){animation-delay:.25s}.suitrow .suittile:nth-child(3){animation-delay:.5s}.suitrow .suittile:nth-child(4){animation-delay:.75s}
 @keyframes tilefloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-5px) rotate(-1.5deg)}}
 .suittile.red{color:#e01f3a;box-shadow:0 6px 14px rgba(224,31,58,.3),0 1px 2px rgba(0,0,0,.3),inset 0 1px 0 #fff,inset 0 -2px 4px rgba(0,0,0,.05);border:1px solid rgba(224,31,58,.18)}.suittile.blk{color:#141420;box-shadow:0 6px 14px rgba(90,169,255,.22),0 1px 2px rgba(0,0,0,.3),inset 0 1px 0 #fff,inset 0 -2px 4px rgba(0,0,0,.05);border:1px solid rgba(20,20,32,.18)}
+.ptc{margin-bottom:30px}   /* keep the bottom seat (S1) clear of the status/last-action line below */
 .confp{position:fixed;top:-16px;width:9px;height:14px;border-radius:2px;z-index:300;pointer-events:none;animation:conf linear forwards}
 @keyframes conf{to{transform:translateY(108vh) rotate(760deg);opacity:.85}}
 .celebrate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:290;pointer-events:none}
@@ -171,7 +172,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 let lastCelebHand=-1;
 function confetti(){
   const cols=['#d4af57','#ef4747','#2ec27e','#4aa3ff','#f1d892','#ff7ac0','#ffd93b'];
-  for(let i=0;i<90;i++){const d=document.createElement('div');d.className='confp';
+  for(let i=0;i<60;i++){const d=document.createElement('div');d.className='confp';
     d.style.left=(Math.random()*100).toFixed(1)+'vw';
     d.style.background=cols[Math.floor(Math.random()*cols.length)];
     d.style.animationDelay=(Math.random()*0.35).toFixed(2)+'s';
@@ -198,13 +199,13 @@ function maybeCelebrate(){
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
 
-// Persistent per-room player id (localStorage): a returning player reclaims the SAME seat + chips
-// even after fully closing the browser — they just rejoin the room with the same code.
-// (For solo multi-tab testing, use separate browsers / incognito windows so each gets its own id.)
+// Per-TAB player id (sessionStorage): unique per tab so two joiners never collide, and it survives a
+// reload (seat resumes). Reclaiming a seat after a full close / on another device is handled separately
+// by name-matching in applyState — so you don't lose your chips even without the stored id.
 function stablePlayerId(room){
   const k='hangout_pid_'+room;let id=null;
-  try{id=localStorage.getItem(k)}catch(e){}
-  if(!id){id='p_'+Math.random().toString(36).slice(2,10);try{localStorage.setItem(k,id)}catch(e){}}
+  try{id=sessionStorage.getItem(k)}catch(e){}
+  if(!id){id='p_'+Math.random().toString(36).slice(2,10);try{sessionStorage.setItem(k,id)}catch(e){}}
   return id;
 }
 // Remember the current room/name for THIS tab only, so a refresh auto-rejoins (but a fresh open doesn't).
@@ -227,6 +228,12 @@ function applyState(d){
   if(str===lastStateStr){if(wasGone)render();return} // heartbeat with no change → don't disrupt the UI
   lastStateStr=str;
   G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
+  // Reclaim-by-name: if we're not seated but a player with our name exists (we reconnected from another
+  // tab/device, or our stored id was lost), adopt that record so we keep our seat and chips.
+  if(!G.isHost&&G.myName&&!G.players[G.myId]){
+    const mine=Object.values(G.players).find(p=>p.name&&p.name.toLowerCase()===G.myName.toLowerCase());
+    if(mine)G.myId=mine.id;
+  }
   syncScreen();render();maybeCelebrate();
 }
 
@@ -388,7 +395,7 @@ function resumeHost(room,name){
     }
   });
   G.screen='lobby';render();
-  joinTimer=setTimeout(()=>{if(!restored){toast('Couldn’t restore your table');clearSession();G.screen='home';render()}},9000);
+  joinTimer=setTimeout(()=>{if(!restored){toast('Couldn’t restore your table');clearSession();G.screen='home';render()}},13000);
 }
 
 function joinRoom(code){
@@ -407,7 +414,7 @@ function joinRoom(code){
         else toast('Can’t reach the game server on this network — try other WiFi or mobile data');
         clearSession();G.screen='home';render();
       }
-    },9000);
+    },13000);
   });
   client.on('message',(topic,payload)=>{
     if(topic!==topicState(G.roomId))return;
