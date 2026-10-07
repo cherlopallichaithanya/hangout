@@ -1249,7 +1249,8 @@ window.copyInvite=function(){const url=inviteUrl();try{navigator.clipboard.write
 window.showLedger=function(){
   const old=document.getElementById('ledmod');if(old){old.remove();return}
   const cr=G.config.chipRatio;
-  const rows=Object.values(G.players).sort((a,b)=>b.chips-a.chips).map(p=>{const fd=p.chips/cr,net=fd-p.totalBuyIn,up=net>=0;return `<div class="settle-row"><span>${esc(p.av||'')} ${esc(p.name)}</span><span><b>${p.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
+  const wins={};(G.config.history||[]).forEach(h=>(h.w||[]).forEach(n=>wins[n]=(wins[n]||0)+1));
+  const rows=Object.values(G.players).sort((a,b)=>b.chips-a.chips).map(p=>{const fd=p.chips/cr,net=fd-p.totalBuyIn,up=net>=0;return `<div class="settle-row"><span>${esc(p.av||'')} ${esc(p.name)} <span style="color:var(--dim);font-size:.75rem">🏆${wins[p.name]||0}</span></span><span><b>${p.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
   const div=document.createElement('div');div.id='ledmod';div.className='mo';
   div.innerHTML=`<div class="mb"><h3>Standings (live)</h3><div class="settle" style="margin-top:0">${rows}</div><button class="btn-o btn-sm" onclick="document.getElementById('ledmod').remove()">Close</button></div>`;
   document.body.appendChild(div);
