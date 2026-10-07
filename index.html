@@ -126,12 +126,33 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 .celebwin{font-size:1.55rem;font-weight:800;color:var(--gold-hi);margin-bottom:5px;text-shadow:0 2px 14px rgba(255,184,77,.55),0 0 26px rgba(212,175,87,.35)}
 .celebmsg{font-size:1.05rem;font-weight:600;color:var(--bright)}
 @keyframes celebpop{from{transform:scale(.55);opacity:0}to{transform:scale(1);opacity:1}}
+#socialbtn{position:fixed;left:14px;bottom:calc(98px + env(safe-area-inset-bottom,0px));width:46px;height:46px;border-radius:50%;background:linear-gradient(145deg,var(--gold-hi),var(--gold-lo));color:#1a1400;font-size:1.25rem;border:none;box-shadow:0 6px 18px rgba(0,0,0,.45);z-index:40;align-items:center;justify-content:center}
+#chatfeed{position:fixed;left:10px;top:58px;display:flex;flex-direction:column;gap:6px;z-index:45;max-width:74vw;pointer-events:none}
+.chatb{background:rgba(20,21,26,.93);border:1px solid var(--border);border-radius:14px;padding:6px 11px;font-size:.82rem;color:var(--text);box-shadow:0 4px 12px rgba(0,0,0,.35);transition:opacity .6s}
+.chatb b{color:var(--gold)}.chatb.fade{opacity:0}
+.socmod{position:fixed;left:0;right:0;bottom:0;z-index:120;display:flex;justify-content:center;padding:0 8px calc(8px + env(safe-area-inset-bottom,0px))}
+.socbar{width:100%;max-width:460px;background:linear-gradient(160deg,var(--surface),var(--bg));border:1px solid var(--border);border-top:2px solid var(--gold);border-radius:16px 16px 0 0;padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 -12px 44px rgba(0,0,0,.55)}
+.socrow{display:flex;gap:8px;align-items:center}
+.socrow select,.socrow input{flex:1;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;color:var(--bright);font-size:.95rem;padding:9px 10px}
+.emgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.embtn{background:var(--s2);border:1px solid var(--border);border-radius:12px;font-size:1.5rem;padding:8px 0;cursor:pointer;transition:transform .08s}
+.embtn:active{transform:scale(.86);background:var(--gold-dim)}
+.emfloat{position:fixed;font-size:2rem;z-index:280;pointer-events:none;animation:emfloat 1.6s ease-out forwards}
+@keyframes emfloat{0%{transform:translateY(0) scale(.6);opacity:0}15%{opacity:1}100%{transform:translateY(-42vh) scale(1.3);opacity:0}}
+.emhit{position:fixed;font-size:2.4rem;z-index:280;pointer-events:none;animation:emhit 1.4s ease-out forwards}
+@keyframes emhit{0%{transform:translate(-50%,-180%) scale(.5);opacity:0}25%{transform:translate(-50%,-50%) scale(1.5);opacity:1}70%{transform:translate(-50%,-50%) scale(1)}100%{transform:translate(-50%,-50%) scale(1);opacity:0}}
+.emboom{position:fixed;font-size:3rem;z-index:281;pointer-events:none;animation:emboom .9s ease-out forwards}
+@keyframes emboom{0%{transform:translate(-50%,-50%) scale(.2);opacity:0}30%{transform:translate(-50%,-50%) scale(1.6);opacity:1}100%{transform:translate(-50%,-50%) scale(2.2);opacity:0}}
+.tsi.emshake{animation:emshake .6s}
+@keyframes emshake{0%,100%{transform:translateX(0)}20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
 @media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}.schips{font-size:.62rem}.felt-pot{font-size:2.3rem}}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="toast" class="toast"></div>
+<div id="chatfeed"></div>
+<button id="socialbtn" onclick="openSocialPanel()" style="display:none" aria-label="Chat and emotes">💬</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
 <script>
 // ===== CONSTANTS =====
@@ -164,6 +185,7 @@ const TOPIC_NS='hangout/v1';                   // namespace so we don't clash wi
 const topicState=r=>TOPIC_NS+'/'+r+'/state';   // host publishes full game state here (retained)
 const topicAction=r=>TOPIC_NS+'/'+r+'/action'; // players publish their actions here
 const topicClaim=r=>TOPIC_NS+'/'+r+'/claim';   // host-takeover claims (to arbitrate a single winner)
+const topicChat=r=>TOPIC_NS+'/'+r+'/chat';     // chat + emotes (peer broadcast, ephemeral)
 let G={
   screen:'home',roomId:null,myId:null,myName:'',isHost:false,
   config:null,players:{},hand:null,cardDraw:null,
@@ -195,11 +217,65 @@ function celebrate(name,praise){
 }
 function maybeCelebrate(){
   const h=G.hand;
-  if(h&&h.status==='complete'&&h.praise&&h.handNum!==lastCelebHand){
-    lastCelebHand=h.handNum;const w=G.players[h.winner];
-    celebrate(w?w.name:'Winner',h.praise);
-  }
+  if(!(h&&h.status==='complete'&&h.praise&&h.handNum!==lastCelebHand))return;
+  lastCelebHand=h.handNum;
+  // Collect winner id(s) — side pots may have multiple winners (splits).
+  let winners=[];
+  if(h.pots&&h.pots.length)h.pots.forEach(p=>{if(p.winner)winners=winners.concat(Array.isArray(p.winner)?p.winner:[p.winner])});
+  if(h.winner)winners.push(h.winner);
+  if(winners.indexOf(G.myId)<0)return;              // only the winner(s) see confetti + praise
+  const me=G.players[G.myId];
+  celebrate(me?me.name:'You',h.praise);
 }
+
+// ===== SOCIAL: chat + emotes (ephemeral peer broadcast; no host needed) =====
+let socialClient=null,socialRoom=null;
+const EMOTES=['💣','🔥','😂','👏','🍺','🌹','💩','👑','🤡','🫡','😎','🥶'];
+function openSocial(room){
+  if(!room||window.mqtt===undefined&&typeof mqtt==='undefined')return;
+  if(socialClient&&socialRoom===room)return;
+  if(socialClient){try{socialClient.end(true)}catch(e){}socialClient=null}
+  socialRoom=room;
+  socialClient=mqtt.connect(BROKER,{clientId:'hs_'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2),clean:true,reconnectPeriod:3000,keepalive:30});
+  socialClient.on('connect',()=>{try{socialClient.subscribe(topicChat(room),{qos:0})}catch(e){}});
+  socialClient.on('error',()=>{});
+  socialClient.on('message',(t,p)=>{if(t!==topicChat(socialRoom))return;let m;try{m=JSON.parse(p.toString())}catch(e){return}onSocial(m)});
+}
+function sendChat(text){text=(text||'').trim();if(text&&socialClient&&socialClient.connected)socialClient.publish(topicChat(G.roomId),JSON.stringify({kind:'chat',from:G.myName||'Someone',text:text.slice(0,140)}),{qos:0})}
+function sendEmote(emoji,target){if(socialClient&&socialClient.connected)socialClient.publish(topicChat(G.roomId),JSON.stringify({kind:'emote',from:G.myName||'Someone',emoji,target}),{qos:0})}
+function onSocial(m){if(!m)return;if(m.kind==='chat')showChatBubble(m.from,m.text);else if(m.kind==='emote')flyEmote(m.emoji,m.target)}
+function showChatBubble(from,text){
+  const feed=document.getElementById('chatfeed');if(!feed)return;
+  const b=document.createElement('div');b.className='chatb';b.innerHTML='<b>'+esc(from)+'</b> '+esc(text);
+  feed.appendChild(b);while(feed.children.length>5)feed.removeChild(feed.firstChild);
+  setTimeout(()=>b.classList.add('fade'),4500);setTimeout(()=>b.remove(),5200);
+}
+function floatEmoji(em,lv,tv){const e=document.createElement('div');e.className='emfloat';e.textContent=em;e.style.left=lv+'vw';e.style.top=tv+'vh';document.body.appendChild(e);setTimeout(()=>e.remove(),1700)}
+function flyEmote(emoji,target){
+  if(target==null||target==='all'){for(let i=0;i<9;i++)floatEmoji(emoji,8+Math.random()*84,60+Math.random()*32);return}
+  const el=document.querySelector('[data-seat="'+target+'"] .tsi');
+  if(!el){for(let i=0;i<5;i++)floatEmoji(emoji,38+Math.random()*24,46);return}
+  const r=el.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+  const e=document.createElement('div');e.className='emhit';e.textContent=emoji;e.style.left=x+'px';e.style.top=y+'px';document.body.appendChild(e);setTimeout(()=>e.remove(),1500);
+  el.classList.add('emshake');setTimeout(()=>el.classList.remove('emshake'),650);
+  if(emoji==='💣'){const b=document.createElement('div');b.className='emboom';b.textContent='💥';b.style.left=x+'px';b.style.top=y+'px';document.body.appendChild(b);setTimeout(()=>b.remove(),900)}
+}
+window.openSocialPanel=function(){
+  const old=document.getElementById('socmod');if(old){old.remove();return}   // toggle
+  const players=Object.values(G.players||{}).sort((a,b)=>a.seat-b.seat);
+  const tgt=players.map(p=>`<option value="${p.seat}">${esc(p.name)}</option>`).join('');
+  const ems=EMOTES.map(e=>`<button class="embtn" onclick="emoteTo('${e}')">${e}</button>`).join('');
+  const div=document.createElement('div');div.id='socmod';div.className='socmod';
+  div.innerHTML=`<div class="socbar"><div class="socrow"><span style="font-size:.72rem;color:var(--dim);white-space:nowrap">Throw to</span>
+      <select id="soctgt"><option value="all">🌐 Everyone</option>${tgt}</select>
+      <button class="embtn" onclick="document.getElementById('socmod').remove()" style="margin-left:auto">✕</button></div>
+    <div class="emgrid">${ems}</div>
+    <div class="socrow"><input id="socmsg" type="text" placeholder="Say something…" maxlength="140" autocomplete="off"><button class="btn-g btn-sm" onclick="chatSend()">Send</button></div></div>`;
+  document.body.appendChild(div);
+  const inp=document.getElementById('socmsg');if(inp)inp.addEventListener('keydown',e=>{if(e.key==='Enter')chatSend()});
+};
+window.emoteTo=function(em){const sel=document.getElementById('soctgt'),t=sel?sel.value:'all';sendEmote(em,t==='all'?'all':+t)};
+window.chatSend=function(){const inp=document.getElementById('socmsg');if(!inp)return;const v=inp.value;inp.value='';sendChat(v)};
 
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
@@ -648,6 +724,10 @@ function backToLobby(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='l
 // ===== RENDER =====
 function render(){
   const app=document.getElementById('app');
+  // Social (chat/emotes) is available whenever we're in a room.
+  const inRoom=!!G.roomId&&(G.screen==='lobby'||G.screen==='game'||G.screen==='results');
+  const sb=document.getElementById('socialbtn');if(sb)sb.style.display=inRoom?'flex':'none';
+  if(inRoom)openSocial(G.roomId);else{const sm=document.getElementById('socmod');if(sm)sm.remove()}
   switch(G.screen){
     case'home':return rHome(app);case'join':return rJoin(app);
     case'lobby':return rLobby(app);case'game':return rGame(app);case'results':return rResults(app);
@@ -721,7 +801,7 @@ function rLobby(app){
       const canSit=!myP;
       inner=`<div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div>`;
     }
-    seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">${inner}</div>`;
+    seats+=`<div class="${cls}" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">${inner}</div>`;
   }
   let cdHtml='';
   if(cd?.done&&cd.cards){
@@ -766,7 +846,7 @@ function rGame(app){
   let seats='';
   for(let i=0;i<SEATS.length;i++){
     const sn=SEATS[i],pos=seatPos(i,SEATS.length),occ=Object.entries(G.players).find(([,p])=>p.seat===sn);
-    if(!occ){const canSit=!me;seats+=`<div class="ts" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
+    if(!occ){const canSit=!me;seats+=`<div class="ts" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%"><div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div></div>`;continue}
     const curPot=(h?.status==='showdown'&&h.pots)?h.pots[h.potIdx]:null;
     const isWait=h?.satOut?.includes(sn);
     const[oid,op]=occ,isOut=op.out,isFold=h?.folded?.includes(sn)&&!isWait&&!isOut,isTurn=h?.status==='betting'&&h.currentSeat===sn,isSD=h?.status==='showdown'&&(curPot?curPot.eligible.includes(sn):!isFold&&!isWait&&!isOut),isSel=isSD&&h?.sel?.includes(oid);
@@ -777,7 +857,7 @@ function rGame(app){
     const bet=(h?.bets||{})[sn];
     const click=isSD&&isH?`onclick="toggleWinner('${oid}')"`:(canToggle?`onclick="toggleSitOut(${sn})"`:'');
     const tag=isOut?'<span style="font-size:.46rem;color:var(--dim);font-weight:700">OUT</span>':(isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''));
-    seats+=`<div class="${cls}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
+    seats+=`<div class="${cls}" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
       <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
