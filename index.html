@@ -833,8 +833,8 @@ function drawCards(){
   toast('Cards drawn!');broadcast();
 }
 
-function reshuffleSeats(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Reshuffle!');broadcast();setTimeout(()=>drawCards(),500)}
-window.toggleReshuffle=function(){if(!G.isHost||!G.config)return;pushUndo();if(G.config.reshuffleEvery>0){G.config.reshuffleSaved=G.config.reshuffleEvery;G.config.reshuffleEvery=0;toast('Auto-reshuffle OFF')}else{G.config.reshuffleEvery=G.config.reshuffleSaved||20;toast('Auto-reshuffle every '+G.config.reshuffleEvery+' hands')}broadcast()};
+function reshuffleSeats(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';toast('Changing seats!');broadcast();setTimeout(()=>drawCards(),500)}
+window.toggleReshuffle=function(){if(!G.isHost||!G.config)return;pushUndo();if(G.config.reshuffleEvery>0){G.config.reshuffleSaved=G.config.reshuffleEvery;G.config.reshuffleEvery=0;toast('Auto seat-change OFF')}else{G.config.reshuffleEvery=G.config.reshuffleSaved||20;toast('Auto seat-change every '+G.config.reshuffleEvery+' hands')}broadcast()};
 function startGame(){pushUndo();arrangeMode=false;arrangeSel=null;G.config.status='playing';broadcast()}
 function endGame(){pushUndo();G.config.status='ended';broadcast()}
 function backToLobby(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
@@ -863,7 +863,7 @@ function rHome(app){
       <div class="fg"><label>Chips per Dollar</label><input type="number" id="icr" value="5" min="1"></div>
       <div class="fr"><div class="fg"><label>Small Blind</label><input type="number" id="isb" value="1" min="1"></div>
       <div class="fg"><label>Big Blind</label><input type="number" id="ibb" value="2" min="1"></div></div>
-      <div class="fr"><div class="fg"><label>Reshuffle Every N Hands</label><input type="number" id="ire" value="20" min="0" max="50"></div>
+      <div class="fr"><div class="fg"><label>Change seats after N hands</label><input type="number" id="ire" value="20" min="0" max="50"></div>
       <div class="fg"><label>Seats at table</label><input type="number" id="ims" value="10" min="2" max="14"></div></div>
       <button type="submit" class="btn-g" style="width:100%;margin-top:4px">Create Table</button>
     </form>
@@ -942,7 +942,7 @@ function rLobby(app){
     <div class="info-bar">
       <span class="chip">Buy-in <b>$${G.config.buyInDollars}</b></span><span class="chip">Chips <b>${cc}</b></span>
       <span class="chip">Blinds <b>${G.config.smallBlind}/${G.config.bigBlind}</b></span><span class="chip">Players <b>${pc}/10</b></span>
-      ${G.config.reshuffleEvery?`<span class="chip">Reshuffle <b>every ${G.config.reshuffleEvery}</b></span>`:''}
+      ${G.config.reshuffleEvery?`<span class="chip">Seat change <b>every ${G.config.reshuffleEvery}</b></span>`:''}
     </div>
     <div class="ptc"><div class="pf"><span class="fl">Hangout</span></div>${seats}</div>
     ${cdHtml}
@@ -1015,10 +1015,10 @@ function rActionPanel(h,me,isH,pl){
   if(isH){
     if(!h||h.status==='complete'){
       const re=G.config?.reshuffleEvery||0,hn=h?.handNum||0,nr=re>0&&hn>0&&hn%re===0;
-      return`<div class="hp"><div class="ab">${nr?`<button class="btn-g" onclick="reshuffleSeats()" style="flex:2">🔄 Reshuffle</button><button class="btn-o" onclick="dealHand()">Skip</button>`
+      return`<div class="hp"><div class="ab">${nr?`<button class="btn-g" onclick="reshuffleSeats()" style="flex:2">🔄 Change seats</button><button class="btn-o" onclick="dealHand()">Skip</button>`
         :`<button class="btn-g" onclick="dealHand()" style="flex:2">${h?'Deal Next':'Deal First Hand'}</button>`}<button class="btn-o" onclick="confirmEnd()">End</button></div>
-        ${nr?`<div style="text-align:center;font-size:.72rem;color:var(--dim)">Time to reshuffle (every ${re} hands)</div>`:''}
-        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn-o btn-sm" onclick="reshuffleSeats()" style="font-size:.72rem">🔀 Shuffle Seats</button><button class="btn-o btn-sm" onclick="toggleReshuffle()" style="font-size:.72rem">⟳ Auto-reshuffle: ${re>0?('every '+re):'off'}</button><button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div></div>`;
+        ${nr?`<div style="text-align:center;font-size:.72rem;color:var(--dim)">Time to change seats (every ${re} hands)</div>`:''}
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn-o btn-sm" onclick="reshuffleSeats()" style="font-size:.72rem">🔀 Change seats now</button><button class="btn-o btn-sm" onclick="toggleReshuffle()" style="font-size:.72rem">⟳ Auto seat-change: ${re>0?('every '+re):'off'}</button><button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div></div>`;
     }
     if(h.status==='roundComplete'){const ri=ROUNDS.indexOf(h.round),nx=ROUNDS[ri+1],lb=nx==='showdown'?'Go to Showdown':'Deal '+RL[nx];
       return`<div class="hp"><div class="hm">Betting complete</div><div class="ab"><button class="btn-g" onclick="advanceRound()">${lb}</button></div></div>`}
