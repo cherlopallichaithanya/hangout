@@ -127,11 +127,13 @@ let joinTimer=null;     // watchdog: if no room state arrives, the room isn't th
 let undoStack=[];       // host-only: state snapshots for multi-level undo
 let arrangeMode=false,arrangeSel=null;   // host-only: manual seat arrangement (lobby)
 let hbTimer=null,lastSeen=0,hostGone=false,lastStateStr='';   // host heartbeat + player-side host-loss detection
+let claiming=false,myClaim=null,claimWin=true,claimTimer=null;   // host-takeover arbitration
 // Free public MQTT broker over secure WebSocket — no account, works on any network/phone/browser.
 const BROKER='wss://broker.emqx.io:8084/mqtt';
 const TOPIC_NS='hangout/v1';                   // namespace so we don't clash with other broker users
 const topicState=r=>TOPIC_NS+'/'+r+'/state';   // host publishes full game state here (retained)
 const topicAction=r=>TOPIC_NS+'/'+r+'/action'; // players publish their actions here
+const topicClaim=r=>TOPIC_NS+'/'+r+'/claim';   // host-takeover claims (to arbitrate a single winner)
 let G={
   screen:'home',roomId:null,myId:null,myName:'',isHost:false,
   config:null,players:{},hand:null,cardDraw:null,
@@ -648,7 +650,7 @@ function rLobby(app){
         <button class="btn-g" onclick="toggleArrange()" style="width:100%;max-width:300px">✓ Done Arranging</button>`
       :`
         ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
-        ${!isH&&G.config?`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.7rem;color:var(--dim)">Take over as host</button>`:''}
+        ${!isH&&G.config?`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.7rem;color:var(--dim)">${claiming?'Claiming…':'Take over as host'}</button>`:''}
         ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Random Draw for Seats</button>`:''}
         ${isH&&pc>=1?`<button class="btn-o" onclick="toggleArrange()" style="width:100%;max-width:300px">🔀 Arrange Seats Manually</button>`:''}
         ${isH&&pc>=2?`<button class="btn-g" onclick="startGame()" style="width:100%;max-width:300px">Start Game (${pc} players)</button>`:''}
@@ -679,8 +681,8 @@ function rGame(app){
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
-    ${hostGone&&!isH?`<div class="arrbanner" style="border-color:var(--red);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap">⚠ Host seems to have left. <button class="btn-g btn-sm" onclick="becomeHost()">Take over as host</button></div>`:''}
-    <div class="gh"><span class="hn">Room ${G.roomId}</span>${isH?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.7rem;padding:4px 12px">↩ Undo</button>`:`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.66rem;padding:4px 8px;color:var(--dim)">Host?</button>`}<span class="hn">${hnd}</span></div>
+    ${hostGone&&!isH?`<div class="arrbanner" style="border-color:var(--red);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap">⚠ Host seems to have left. <button class="btn-g btn-sm" onclick="becomeHost()">${claiming?'Claiming…':'Take over as host'}</button></div>`:''}
+    <div class="gh"><span class="hn">Room ${G.roomId}</span>${isH?`<button class="btn-o btn-sm" onclick="undo()" style="font-size:.7rem;padding:4px 12px">↩ Undo</button>`:`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.66rem;padding:4px 8px;color:var(--dim)">${claiming?'…':'Host?'}</button>`}<span class="hn">${hnd}</span></div>
     <div class="ptc"><div class="pf"><div class="felt-center">
       <div class="felt-round">${h?RL[h.round]||h.round:'Waiting'}</div>
       <div class="felt-pot">${pot}</div>
@@ -775,17 +777,36 @@ window.arrangeTap=(sn)=>{
   G.cardDraw=null;                                     // manual arrangement supersedes any random draw
   arrangeSel=null;broadcast();
 };
-// A player takes over authority (e.g. the host left). Re-establishes the room from their known state.
+// A player takes over authority (e.g. the host left). Uses a claim-and-wait so that if several
+// players try at once, exactly one wins (lowest random token) and the rest yield — never two hosts.
 window.becomeHost=()=>{
-  if(G.isHost)return;
+  if(G.isHost||claiming)return;
   if(!G.config){toast('No game state yet — can’t take over');return}
+  if(!(client&&client.connected)){toast('Not connected — try again');return}
   if(!confirm('Take over as host? Do this only if the host has left. You’ll run the table from here.'))return;
-  try{if(client)client.end(true)}catch(e){}
-  client=null;clearTimeout(joinTimer);undoStack=[];
-  G.isHost=true;                 // keep our own player id/seat; we just gain authority
-  saveSession();
-  hostConnect();                 // subscribe to actions + (re)publish our state as the retained room state
-  toast('You are now the host');
+  claiming=true;claimWin=true;
+  myClaim=Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);  // lowest token wins
+  const onClaim=(topic,payload)=>{
+    if(topic!==topicClaim(G.roomId))return;
+    let c;try{c=JSON.parse(payload.toString())}catch(e){return}
+    if(!c||c.from===G.myId)return;
+    if(c.claim<myClaim)claimWin=false;              // a higher-priority claimant exists → we yield
+  };
+  client.on('message',onClaim);
+  client.subscribe(topicClaim(G.roomId),{qos:1});
+  client.publish(topicClaim(G.roomId),JSON.stringify({from:G.myId,claim:myClaim}),{qos:1});
+  toast('Claiming host…');
+  clearTimeout(claimTimer);
+  claimTimer=setTimeout(()=>{
+    try{client.removeListener('message',onClaim)}catch(e){}
+    try{client.unsubscribe(topicClaim(G.roomId))}catch(e){}
+    claiming=false;
+    if(!claimWin){toast('Another player is taking over');render();return}
+    try{if(client)client.end(true)}catch(e){}
+    client=null;clearInterval(hbTimer);hbTimer=null;clearTimeout(joinTimer);undoStack=[];
+    G.isHost=true;hostGone=false;saveSession();hostConnect();   // keep our id/seat; gain authority
+    toast('You are now the host');render();
+  },1500);
   render();
 };
 window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
