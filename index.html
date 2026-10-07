@@ -261,7 +261,7 @@ window.undo=function(){
 function createHost(config){
   G.roomId=genCode();
   G.isHost=true;
-  G.config={...config,status:'lobby'};
+  G.config={...config,status:'lobby',expenses:[]};   // expenses live in config so they sync automatically
   G.myId='host';
   // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
   G.players={'host':{id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true}};
@@ -517,12 +517,20 @@ function awardCurrentPot(){
   if(h.status==='showdown'){const np=h.pots[h.potIdx];if(np)toast('Now award side pot '+h.potIdx+' ('+np.amount+' chips) to the best remaining hand')}
   broadcast();
 }
-// Minimal who-pays-whom to settle the session (greedy match of biggest debtor ↔ biggest creditor).
+// Minimal who-pays-whom to settle the session: poker P/L + shared expenses (food, etc.).
 function computeSettlement(){
-  const cr=G.config.chipRatio;
-  const nets=Object.values(G.players).map(p=>({name:p.name,net:(p.chips/cr)-p.totalBuyIn}));
-  const cred=nets.filter(x=>x.net>0.004).map(x=>({name:x.name,amt:x.net})).sort((a,b)=>b.amt-a.amt);
-  const deb=nets.filter(x=>x.net<-0.004).map(x=>({name:x.name,amt:-x.net})).sort((a,b)=>b.amt-a.amt);
+  const cr=G.config.chipRatio,net={};
+  Object.values(G.players).forEach(p=>{net[p.id]={name:p.name,v:(p.chips/cr)-p.totalBuyIn}});
+  (G.config.expenses||[]).forEach(e=>{
+    const sh=(e.split&&e.split.length?e.split:Object.keys(G.players)).filter(id=>net[id]);
+    if(!sh.length)return;
+    const per=e.amount/sh.length;
+    if(net[e.by])net[e.by].v+=e.amount;              // whoever paid is owed it back
+    sh.forEach(id=>{net[id].v-=per});                // each person splitting owes their share
+  });
+  const arr=Object.values(net);
+  const cred=arr.filter(x=>x.v>0.004).map(x=>({name:x.name,amt:x.v})).sort((a,b)=>b.amt-a.amt);
+  const deb=arr.filter(x=>x.v<-0.004).map(x=>({name:x.name,amt:-x.v})).sort((a,b)=>b.amt-a.amt);
   const tx=[];let i=0,j=0;
   while(i<deb.length&&j<cred.length){
     const pay=Math.min(deb[i].amt,cred[j].amt);
@@ -752,9 +760,11 @@ function rResults(app){
   const entries=Object.values(G.players).sort((a,b)=>b.chips-a.chips);let rows='';
   for(const p of entries){const fd=(p.chips/G.config.chipRatio).toFixed(2),pr=parseFloat(fd)-p.totalBuyIn,pc=pr>=0?'up':'down',ps=pr>=0?'+$'+pr.toFixed(2):'-$'+Math.abs(pr).toFixed(2);
     rows+=`<div class="rrow"><div><div class="rn">${esc(p.name)}</div><div class="rd">$${fd} final</div></div><div style="text-align:right"><div class="rc">${p.chips} chips</div><div class="rp ${pc}">${ps}</div></div></div>`}
+  const exs=G.config.expenses||[];
+  const exHtml=`<div class="settle"><div class="settle-h">Expenses (split equally)</div>${exs.length?exs.map((e,i)=>`<div class="settle-row"><span>${esc(e.desc)} · paid by ${esc(G.players[e.by]?.name||'?')}</span><span><b>$${(+e.amount).toFixed(2)}</b>${G.isHost?` <button onclick="delExpense(${i})" style="background:none;border:none;color:var(--red);font-size:1rem;cursor:pointer;padding:0 2px">✕</button>`:''}</span></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">No expenses added</div>`}${G.isHost?`<button class="btn-o btn-sm" onclick="showExpenseModal()" style="margin-top:6px">＋ Add food / expense</button>`:''}</div>`;
   const tx=computeSettlement();
   const settle=`<div class="settle"><div class="settle-h">Settle Up</div>${tx.length?tx.map(t=>`<div class="settle-row"><span>${esc(t.from)} pays ${esc(t.to)}</span><b>$${t.amt.toFixed(2)}</b></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">All square — no payments needed</div>`}</div>`;
-  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${settle}
+  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${exHtml}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
       ${G.isHost?`<button class="btn-g" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
@@ -865,6 +875,34 @@ window.confirmRebuy=function(amt){
   document.getElementById('rbno').onclick=()=>div.remove();
   document.getElementById('rbyes').onclick=()=>{div.remove();doRebuy(amt)};
 };
+// Expenses (food, etc.) — host adds; split equally among all players and folded into the settlement.
+window.showExpenseModal=function(){
+  if(!G.isHost)return;
+  const old=document.getElementById('exmod');if(old)old.remove();
+  const opts=Object.values(G.players).map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const n=Object.keys(G.players).length;
+  const div=document.createElement('div');div.id='exmod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Add Expense</h3>
+    <input id="exd" type="text" placeholder="What for? (e.g. Pizza)" maxlength="24" autocomplete="off">
+    <input id="exa" type="number" placeholder="Amount ($)" min="0" step="0.01" inputmode="decimal">
+    <select id="exb" style="width:100%;padding:10px 12px;font-size:1rem;border:1.5px solid var(--border);border-radius:var(--r);background:var(--bg);color:var(--bright)">${opts}</select>
+    <div style="font-size:.72rem;color:var(--dim);text-align:center">Paid by (above) · split equally among all ${n} players</div>
+    <div class="mbs"><button class="btn-o" onclick="document.getElementById('exmod').remove()">Cancel</button><button class="btn-g" id="exadd">Add</button></div></div>`;
+  document.body.appendChild(div);
+  setTimeout(()=>document.getElementById('exd')?.focus(),50);
+  document.getElementById('exadd').onclick=()=>{
+    const d=document.getElementById('exd').value.trim()||'Expense',a=+document.getElementById('exa').value,by=document.getElementById('exb').value;
+    if(!(a>0)){toast('Enter an amount');return}
+    document.getElementById('exmod').remove();addExpense(d,a,by);
+  };
+};
+window.addExpense=(desc,amount,by)=>{
+  if(!G.isHost)return;pushUndo();
+  G.config.expenses=G.config.expenses||[];
+  G.config.expenses.push({desc,amount,by,split:Object.keys(G.players)});
+  toast('Added '+desc+' $'+amount.toFixed(2));broadcast();
+};
+window.delExpense=(i)=>{if(!G.isHost)return;pushUndo();(G.config.expenses||[]).splice(i,1);broadcast()};
 window.doReset=()=>{if(G.isHost&&!confirm('End this table for EVERYONE and start fresh? Chips and the current game will be lost. (To just change seats, use “Arrange Seats Manually” instead.)'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
 window.doNewGame=()=>{if(!confirm('Leave this table and go to the start screen?'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';render()};
 
