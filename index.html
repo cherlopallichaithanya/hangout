@@ -286,7 +286,7 @@ window.emoteTo=function(em){const sel=document.getElementById('soctgt'),t=sel?se
 window.chatSend=function(){const inp=document.getElementById('socmsg');if(!inp)return;const v=inp.value;inp.value='';sendChat(v)};
 
 // Tap-to-send quick phrases
-const QUICKCHAT=['Bluff ra! 😏','Fold avvu mama! 🙏','All in po! 🔥','Lucky gadu! 🍀','Next time chustha! 😤','Superb mama! 👏','Em chestunnav! 🤔','Scene ledu! 😎','Chese mama! 💪','Paisa pedta! 💰'];
+const QUICKCHAT=['Bluff kada! 😏','Fold avvu mama! 🙏','All in po! 🔥','Lucky gadu! 🍀','Next time chustha! 😤','Superb mama! 👏','Em chestunnav! 🤔'];
 window.quickChat=function(i){if(QUICKCHAT[i])sendChat(QUICKCHAT[i])};
 // One-tap throw at whoever's turn it is (or everyone between turns)
 window.quickThrow=function(em){const t=(G.hand&&G.hand.status==='betting'&&G.hand.currentSeat)?G.hand.currentSeat:'all';sendEmote(em,t)};
