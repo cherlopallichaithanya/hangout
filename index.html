@@ -143,10 +143,11 @@ const cv=(r,s)=>RV[r]*10+SV[s], isRed=s=>s==='♥'||s==='♦';
 const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
 // Seats laid out so the NEXT seat (higher number = next to act) sits to the LEFT, i.e. action moves left like real poker.
 const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50+48*Math.cos(a),top:50+44*Math.sin(a)}};
-const PRAISES=['Amazing game! 🔥','Great play! 👏','Wonderful strategy! 🧠','What a poker pro! 🎩','Masterful move! ♠️','Smooth operator! 😎','Ice in the veins! 🧊','Absolute legend! 🏆','Big-brain poker! 🧠','Clinical finish! 🎯','That was slick! ✨','Reading souls tonight! 👀','Shark in the water! 🦈','Chip magnet! 🧲',
+const PRAISES=[
   'Nuvvu thopheyy! 🔥','Ninnu appe valle leru! 🚀','Paisa vasool mama! 💰','Garana Moogudu nuvvu! 😎','Moosagalake Moosagadivi nuvvu! 🦊',
-  'Oka sari commit aithe nee maata nuvve vinanu! 💪','Nuvvu kodithe dimma tirigi mind block! 🥊','Nuvvu thagadhu alludu! 🚫','Ne route ae seperatuuu! 😎','Pakka commercial hit! 🎬','One life, one chance! ⚡','Attack antene ishtam! ⚔️','Mind block ! 🤯',
-  'Pokiri nuvvu! 🔫','Businessman nuvvu! 💼','Magadheera nuvvu! ⚔️','Baahubali nuvvu! 👑','Gabbar Singh nuvvu! 🔫','Race Gurram nuvvu! 🏁'];
+  'Oka sari commit aithe nee maata nuvve vinanu! 💪','Nuvvu kodithe dimma tirigi mind block! 🥊','Nuvvu thagadhu alludu! 🚫','Ne route ae seperatuuu! 😎','Pakka commercial hit! 🎬','Mind block! 🤯',
+  'Nuvvu Pushpa….. fire! 🔥','Nuvvu Pushpa Raj…. Wild fire! 🌿','Ne Avva thagedhe leh! 💢','Em magaad ra nuvvu! 😎','Nee dari raha dari! 🎯','Sarrainodivi nuvvu! 🥊',
+  'Pokiri nuvvu! 🔫','Businessman nuvvu! 💼','Magadheera nuvvu! ⚔️','Baahubali nuvvu! 👑','Gabbar Singh nuvvu! 🔫','Race Gurram nuvvu! 🏁','Khiladi nuvvu! 🎯','Srimanthudu nuvvu! 💰'];
 const randPraise=()=>PRAISES[Math.floor(Math.random()*PRAISES.length)];
 
 // ===== STATE =====
@@ -189,7 +190,7 @@ function celebrate(name,praise){
   const d=document.createElement('div');d.id='celeb';d.className='celebrate';
   d.innerHTML=`<div class="celebcard"><div class="celebwin">🏆 ${esc(name)}</div><div class="celebmsg">${esc(praise)}</div></div>`;
   document.body.appendChild(d);
-  setTimeout(()=>d.classList.add('out'),2000);setTimeout(()=>d.remove(),2700);
+  setTimeout(()=>d.classList.add('out'),4200);setTimeout(()=>d.remove(),4900);
 }
 function maybeCelebrate(){
   const h=G.hand;
