@@ -127,6 +127,11 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 .celebmsg{font-size:1.05rem;font-weight:600;color:var(--bright)}
 @keyframes celebpop{from{transform:scale(.55);opacity:0}to{transform:scale(1);opacity:1}}
 #socialbtn{position:fixed;left:14px;bottom:calc(98px + env(safe-area-inset-bottom,0px));width:46px;height:46px;border-radius:50%;background:linear-gradient(145deg,var(--gold-hi),var(--gold-lo));color:#1a1400;font-size:1.25rem;border:none;box-shadow:0 6px 18px rgba(0,0,0,.45);z-index:40;align-items:center;justify-content:center}
+#quickbomb{position:fixed;left:14px;bottom:calc(152px + env(safe-area-inset-bottom,0px));width:46px;height:46px;border-radius:50%;background:linear-gradient(145deg,#ff6b6b,#c0392b);font-size:1.25rem;border:none;box-shadow:0 6px 18px rgba(0,0,0,.45);z-index:40;align-items:center;justify-content:center}
+#quickbomb:active,#socialbtn:active{transform:scale(.9)}
+.qchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.qchip{flex:0 0 auto;background:var(--s2);border:1px solid var(--border);border-radius:16px;color:var(--text);font-size:.8rem;padding:6px 11px;white-space:nowrap;cursor:pointer}
+.qchip:active{background:var(--gold-dim);border-color:var(--gold)}
 #chatfeed{position:fixed;left:10px;top:58px;display:flex;flex-direction:column;gap:6px;z-index:45;max-width:74vw;pointer-events:none}
 .chatb{background:rgba(20,21,26,.93);border:1px solid var(--border);border-radius:14px;padding:6px 11px;font-size:.82rem;color:var(--text);box-shadow:0 4px 12px rgba(0,0,0,.35);transition:opacity .6s}
 .chatb b{color:var(--gold)}.chatb.fade{opacity:0}
@@ -152,6 +157,7 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 <div id="app"></div>
 <div id="toast" class="toast"></div>
 <div id="chatfeed"></div>
+<button id="quickbomb" onclick="quickThrow('💣')" style="display:none" aria-label="Throw a bomb at the current player">💣</button>
 <button id="socialbtn" onclick="openSocialPanel()" style="display:none" aria-label="Chat and emotes">💬</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
 <script>
@@ -208,7 +214,7 @@ function confetti(){
     document.body.appendChild(d);setTimeout(()=>d.remove(),3400);}
 }
 function celebrate(name,praise){
-  confetti();
+  confetti();sfxCheer();
   const old=document.getElementById('celeb');if(old)old.remove();
   const d=document.createElement('div');d.id='celeb';d.className='celebrate';
   d.innerHTML=`<div class="celebcard"><div class="celebwin">🏆 ${esc(name)}</div><div class="celebmsg">${esc(praise)}</div></div>`;
@@ -252,6 +258,7 @@ function showChatBubble(from,text){
 }
 function floatEmoji(em,lv,tv){const e=document.createElement('div');e.className='emfloat';e.textContent=em;e.style.left=lv+'vw';e.style.top=tv+'vh';document.body.appendChild(e);setTimeout(()=>e.remove(),1700)}
 function flyEmote(emoji,target){
+  emoteSound(emoji);
   if(target==null||target==='all'){for(let i=0;i<9;i++)floatEmoji(emoji,8+Math.random()*84,60+Math.random()*32);return}
   const el=document.querySelector('[data-seat="'+target+'"] .tsi');
   if(!el){for(let i=0;i<5;i++)floatEmoji(emoji,38+Math.random()*24,46);return}
@@ -270,12 +277,32 @@ window.openSocialPanel=function(){
       <select id="soctgt"><option value="all">🌐 Everyone</option>${tgt}</select>
       <button class="embtn" onclick="document.getElementById('socmod').remove()" style="margin-left:auto">✕</button></div>
     <div class="emgrid">${ems}</div>
+    <div class="qchips">${QUICKCHAT.map((p,i)=>`<button class="qchip" onclick="quickChat(${i})">${esc(p)}</button>`).join('')}</div>
     <div class="socrow"><input id="socmsg" type="text" placeholder="Say something…" maxlength="140" autocomplete="off"><button class="btn-g btn-sm" onclick="chatSend()">Send</button></div></div>`;
   document.body.appendChild(div);
   const inp=document.getElementById('socmsg');if(inp)inp.addEventListener('keydown',e=>{if(e.key==='Enter')chatSend()});
 };
 window.emoteTo=function(em){const sel=document.getElementById('soctgt'),t=sel?sel.value:'all';sendEmote(em,t==='all'?'all':+t)};
 window.chatSend=function(){const inp=document.getElementById('socmsg');if(!inp)return;const v=inp.value;inp.value='';sendChat(v)};
+
+// Tap-to-send quick phrases
+const QUICKCHAT=['Bluff ra! 😏','Fold avvu mama! 🙏','All in po! 🔥','Lucky gadu! 🍀','Next time chustha! 😤','Superb mama! 👏','Em chestunnav! 🤔','Scene ledu! 😎','Chese mama! 💪','Paisa pedta! 💰'];
+window.quickChat=function(i){if(QUICKCHAT[i])sendChat(QUICKCHAT[i])};
+// One-tap throw at whoever's turn it is (or everyone between turns)
+window.quickThrow=function(em){const t=(G.hand&&G.hand.status==='betting'&&G.hand.currentSeat)?G.hand.currentSeat:'all';sendEmote(em,t)};
+
+// ===== SOUND (Web Audio, synthesized — no external files) =====
+let _ac=null;
+function ac(){try{if(!_ac)_ac=new (window.AudioContext||window.webkitAudioContext)();if(_ac.state==='suspended')_ac.resume()}catch(e){_ac=null}return _ac}
+document.addEventListener('pointerdown',()=>{try{ac()}catch(e){}});   // unlock audio on first tap
+function noiseBuf(dur){const c=_ac;if(!c)return null;const n=Math.floor(c.sampleRate*dur);const b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;return b}
+function sfxBoom(){const c=ac();if(!c)return;const t=c.currentTime;
+  const o=c.createOscillator(),g=c.createGain();o.type='sine';o.frequency.setValueAtTime(130,t);o.frequency.exponentialRampToValueAtTime(38,t+0.4);g.gain.setValueAtTime(0.6,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.5);o.connect(g).connect(c.destination);o.start(t);o.stop(t+0.5);
+  const b=noiseBuf(0.5);if(b){const s=c.createBufferSource();s.buffer=b;const f=c.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(1800,t);f.frequency.exponentialRampToValueAtTime(180,t+0.4);const ng=c.createGain();ng.gain.setValueAtTime(0.7,t);ng.gain.exponentialRampToValueAtTime(0.001,t+0.45);s.connect(f).connect(ng).connect(c.destination);s.start(t);s.stop(t+0.45)}}
+function sfxPop(){const c=ac();if(!c)return;const t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='triangle';o.frequency.setValueAtTime(620,t);o.frequency.exponentialRampToValueAtTime(930,t+0.08);g.gain.setValueAtTime(0.28,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.18);o.connect(g).connect(c.destination);o.start(t);o.stop(t+0.18)}
+function sfxClap(){const c=ac();if(!c)return;for(let i=0;i<7;i++){const t=c.currentTime+i*0.085+Math.random()*0.02,b=noiseBuf(0.08);if(!b)continue;const s=c.createBufferSource();s.buffer=b;const f=c.createBiquadFilter();f.type='bandpass';f.frequency.value=1400+Math.random()*900;const g=c.createGain();g.gain.setValueAtTime(0.22,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.1);s.connect(f).connect(g).connect(c.destination);s.start(t);s.stop(t+0.1)}}
+function sfxCheer(){sfxClap();const c=ac();if(!c)return;const t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='sawtooth';o.frequency.setValueAtTime(420,t);o.frequency.exponentialRampToValueAtTime(840,t+0.5);g.gain.setValueAtTime(0.0,t);g.gain.linearRampToValueAtTime(0.13,t+0.1);g.gain.exponentialRampToValueAtTime(0.001,t+0.6);o.connect(g).connect(c.destination);o.start(t);o.stop(t+0.6)}
+function emoteSound(em){if(em==='💣')sfxBoom();else if(em==='👏')sfxClap();else sfxPop()}
 
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
@@ -727,6 +754,7 @@ function render(){
   // Social (chat/emotes) is available whenever we're in a room.
   const inRoom=!!G.roomId&&(G.screen==='lobby'||G.screen==='game'||G.screen==='results');
   const sb=document.getElementById('socialbtn');if(sb)sb.style.display=inRoom?'flex':'none';
+  const qb=document.getElementById('quickbomb');if(qb)qb.style.display=(inRoom&&G.screen==='game')?'flex':'none';
   if(inRoom)openSocial(G.roomId);else{const sm=document.getElementById('socmod');if(sm)sm.remove()}
   switch(G.screen){
     case'home':return rHome(app);case'join':return rJoin(app);
