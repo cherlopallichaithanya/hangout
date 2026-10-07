@@ -838,6 +838,7 @@ window.toggleReshuffle=function(){if(!G.isHost||!G.config)return;pushUndo();if(G
 function startGame(){pushUndo();arrangeMode=false;arrangeSel=null;G.config.status='playing';broadcast()}
 function endGame(){pushUndo();G.config.status='ended';broadcast()}
 function backToLobby(){pushUndo();G.hand=null;G.cardDraw=null;G.config.status='lobby';broadcast()}
+window.resumeGame=function(){if(!G.isHost||!G.config)return;pushUndo();G.config.status='playing';G.screen='game';toast('Back in the game');broadcast()};
 
 // ===== RENDER =====
 function render(){
@@ -1082,6 +1083,7 @@ function rResults(app){
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
       <button class="btn-g" onclick="shareSummary()" style="width:100%;max-width:300px">📤 Share results</button>
       ${G.isHost?`<button class="btn-o btn-sm" onclick="undo()">↩ Undo last change</button>`:''}
+      ${G.isHost?`<button class="btn-g" onclick="resumeGame()" style="width:100%;max-width:300px">▶ Resume game</button>`:''}
       ${G.isHost?`<button class="btn-o" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
     </div></div></div>`;
