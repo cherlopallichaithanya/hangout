@@ -249,7 +249,7 @@ function openSocial(room){
 }
 function sendChat(text){text=(text||'').trim();if(text&&socialClient&&socialClient.connected)socialClient.publish(topicChat(G.roomId),JSON.stringify({kind:'chat',from:G.myName||'Someone',text:text.slice(0,140)}),{qos:0})}
 function sendEmote(emoji,target){if(socialClient&&socialClient.connected)socialClient.publish(topicChat(G.roomId),JSON.stringify({kind:'emote',from:G.myName||'Someone',emoji,target}),{qos:0})}
-function onSocial(m){if(!m)return;if(m.kind==='chat')showChatBubble(m.from,m.text);else if(m.kind==='emote')flyEmote(m.emoji,m.target)}
+function onSocial(m){if(!m)return;if(m.kind==='chat')showChatBubble(m.from,m.text);else if(m.kind==='emote'){flyEmote(m.emoji,m.target);showChatBubble(m.from,m.emoji+' → '+seatName(m.target))}}
 function showChatBubble(from,text){
   const feed=document.getElementById('chatfeed');if(!feed)return;
   const b=document.createElement('div');b.className='chatb';b.innerHTML='<b>'+esc(from)+'</b> '+esc(text);
@@ -302,7 +302,18 @@ function sfxBoom(){const c=ac();if(!c)return;const t=c.currentTime;
 function sfxPop(){const c=ac();if(!c)return;const t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='triangle';o.frequency.setValueAtTime(620,t);o.frequency.exponentialRampToValueAtTime(930,t+0.08);g.gain.setValueAtTime(0.28,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.18);o.connect(g).connect(c.destination);o.start(t);o.stop(t+0.18)}
 function sfxClap(){const c=ac();if(!c)return;for(let i=0;i<7;i++){const t=c.currentTime+i*0.085+Math.random()*0.02,b=noiseBuf(0.08);if(!b)continue;const s=c.createBufferSource();s.buffer=b;const f=c.createBiquadFilter();f.type='bandpass';f.frequency.value=1400+Math.random()*900;const g=c.createGain();g.gain.setValueAtTime(0.22,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.1);s.connect(f).connect(g).connect(c.destination);s.start(t);s.stop(t+0.1)}}
 function sfxCheer(){sfxClap();const c=ac();if(!c)return;const t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='sawtooth';o.frequency.setValueAtTime(420,t);o.frequency.exponentialRampToValueAtTime(840,t+0.5);g.gain.setValueAtTime(0.0,t);g.gain.linearRampToValueAtTime(0.13,t+0.1);g.gain.exponentialRampToValueAtTime(0.001,t+0.6);o.connect(g).connect(c.destination);o.start(t);o.stop(t+0.6)}
-function emoteSound(em){if(em==='💣')sfxBoom();else if(em==='👏')sfxClap();else sfxPop()}
+function tone(f,type,dur,g,at,slideTo){const c=ac();if(!c)return;const o=c.createOscillator(),ga=c.createGain(),t=c.currentTime+(at||0);o.type=type||'sine';o.frequency.setValueAtTime(f,t);if(slideTo)o.frequency.exponentialRampToValueAtTime(slideTo,t+dur);ga.gain.setValueAtTime(g||0.25,t);ga.gain.exponentialRampToValueAtTime(0.001,t+dur);o.connect(ga).connect(c.destination);o.start(t);o.stop(t+dur+0.02)}
+function sfxWhoosh(){const c=ac();if(!c)return;const t=c.currentTime,b=noiseBuf(0.4);if(!b)return;const s=c.createBufferSource();s.buffer=b;const f=c.createBiquadFilter();f.type='highpass';f.frequency.setValueAtTime(300,t);f.frequency.exponentialRampToValueAtTime(5000,t+0.35);const g=c.createGain();g.gain.setValueAtTime(0.4,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.4);s.connect(f).connect(g).connect(c.destination);s.start(t);s.stop(t+0.4)}
+function sfxLaugh(){for(let i=0;i<4;i++)tone(520-i*40,'square',0.1,0.18,i*0.12,360-i*30)}
+function sfxClink(){tone(1800,'sine',0.12,0.25,0);tone(2350,'sine',0.13,0.2,0.1)}
+function sfxChime(){tone(660,'sine',0.25,0.22,0);tone(880,'sine',0.3,0.2,0.12);tone(1320,'sine',0.35,0.16,0.24)}
+function sfxHonk(){tone(300,'square',0.18,0.28,0,180);tone(300,'square',0.18,0.28,0.22,180)}
+function sfxSquelch(){const c=ac();if(!c)return;tone(150,'sawtooth',0.3,0.28,0,70);const b=noiseBuf(0.25);if(b){const s=c.createBufferSource();s.buffer=b;const f=c.createBiquadFilter();f.type='lowpass';f.frequency.value=500;const g=c.createGain();const t=c.currentTime;g.gain.setValueAtTime(0.22,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.3);s.connect(f).connect(g).connect(c.destination);s.start(t);s.stop(t+0.3)}}
+function sfxCool(){tone(300,'sawtooth',0.3,0.22,0,520)}
+function sfxFreeze(){for(let i=0;i<6;i++)tone(2000+((i%2)?220:0),'sine',0.08,0.11,i*0.07)}
+function sfxBeep(){tone(900,'square',0.12,0.22,0)}
+function emoteSound(em){switch(em){case'💣':return sfxBoom();case'🔥':return sfxWhoosh();case'👏':return sfxClap();case'😂':return sfxLaugh();case'🍺':return sfxClink();case'🌹':case'👑':return sfxChime();case'🤡':return sfxHonk();case'💩':return sfxSquelch();case'😎':return sfxCool();case'🥶':return sfxFreeze();case'🫡':return sfxBeep();default:return sfxPop()}}
+function seatName(target){if(target==='all'||target==null)return 'Everyone';const p=Object.values(G.players||{}).find(x=>x.seat===target);return p?p.name:('Seat '+target)}
 
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
