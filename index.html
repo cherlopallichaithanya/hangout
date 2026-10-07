@@ -285,7 +285,7 @@ window.undo=function(){
 function createHost(config){
   G.roomId=genCode();
   G.isHost=true;
-  G.config={...config,status:'lobby',expenses:[]};   // expenses live in config so they sync automatically
+  G.config={...config,status:'lobby',expenses:[],hostId:'host'};   // expenses+hostId live in config so they sync automatically
   G.myId='host';
   // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
   G.players={'host':{id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true}};
@@ -655,6 +655,7 @@ function rLobby(app){
     }else if(occ){
       const[oid,op]=occ;let badge='';
       if(cd?.done&&cd.seating){const s=cd.seating[oid];if(s===1)badge='<span class="sbadge">D</span>';else if(s===2)badge='<span class="sbadge">SB</span>';else if(s===3&&pc>2)badge='<span class="sbadge">BB</span>'}
+      if(G.config&&G.config.hostId===oid)badge+='<span class="sbadge" style="background:var(--green);color:#04210f">HOST</span>';
       inner=`<div class="tsi"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span>${badge}</div>`;
     }else{
       const canSit=!myP;
@@ -712,6 +713,7 @@ function rGame(app){
     const canToggle=isH&&!isSD&&(!h||h.status==='complete');   // between hands, host can sit a player out / back
     let cls='ts occ';if(oid===G.myId)cls+=' me';if(isTurn)cls+=' act';if(isFold)cls+=' fold';
     let badge='';if(h&&!isWait&&!isOut){if(sn===h.dealerSeat)badge='<span class="sbadge">D</span>';else if(sn===h.sbSeat)badge='<span class="sbadge">SB</span>';else if(sn===h.bbSeat)badge='<span class="sbadge">BB</span>'}
+    if(G.config&&G.config.hostId===oid)badge+='<span class="sbadge" style="background:var(--green);color:#04210f">HOST</span>';
     const bet=(h?.bets||{})[sn];
     const click=isSD&&isH?`onclick="toggleWinner('${oid}')"`:(canToggle?`onclick="toggleSitOut(${sn})"`:'');
     const tag=isOut?'<span style="font-size:.46rem;color:var(--dim);font-weight:700">OUT</span>':(isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''));
@@ -740,7 +742,7 @@ function rActionPanel(h,me,isH,pl){
     if(!h||h.status==='complete'){
       const re=G.config?.reshuffleEvery||0,hn=h?.handNum||0,nr=re>0&&hn>0&&hn%re===0;
       return`<div class="hp"><div class="ab">${nr?`<button class="btn-g" onclick="reshuffleSeats()" style="flex:2">🔄 Reshuffle</button><button class="btn-o" onclick="dealHand()">Skip</button>`
-        :`<button class="btn-g" onclick="dealHand()" style="flex:2">${h?'Deal Next':'Deal First Hand'}</button>`}<button class="btn-o" onclick="endGame()">End</button></div>
+        :`<button class="btn-g" onclick="dealHand()" style="flex:2">${h?'Deal Next':'Deal First Hand'}</button>`}<button class="btn-o" onclick="confirmEnd()">End</button></div>
         ${nr?`<div style="text-align:center;font-size:.72rem;color:var(--dim)">Time to reshuffle (every ${re} hands)</div>`:''}
         <div style="display:flex;gap:8px;justify-content:center"><button class="btn-o btn-sm" onclick="reshuffleSeats()" style="font-size:.72rem">🔀 Shuffle Seats</button><button class="btn-o btn-sm" onclick="backToLobby()" style="font-size:.72rem">Back to Lobby</button></div></div>`;
     }
@@ -792,6 +794,7 @@ function rResults(app){
   const settle=`<div class="settle"><div class="settle-h">Settle Up</div>${tx.length?tx.map(t=>`<div class="settle-row"><span>${esc(t.from)} pays ${esc(t.to)}</span><b>$${t.amt.toFixed(2)}</b></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">All square — no payments needed</div>`}</div>`;
   app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${exHtml}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
+      ${G.isHost&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()">↩ Undo last change</button>`:''}
       ${G.isHost?`<button class="btn-g" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
     </div></div></div>`;
@@ -851,7 +854,7 @@ window.becomeHost=()=>{
     if(!claimWin){toast('Another player is taking over');render();return}
     try{if(client)client.end(true)}catch(e){}
     client=null;clearInterval(hbTimer);hbTimer=null;clearTimeout(joinTimer);undoStack=[];
-    G.isHost=true;hostGone=false;saveSession();hostConnect(true);   // keep our id/seat; gain authority, demote any old host
+    G.isHost=true;hostGone=false;if(G.config)G.config.hostId=G.myId;saveSession();hostConnect(true);   // keep our id/seat; gain authority, demote any old host
     toast('You are now the host');render();
   },1500);
   render();
@@ -878,6 +881,7 @@ window.toggleSitOut=(seat)=>{
 window.imBack=()=>{if(G.isHost){const p=G.players[G.myId];if(p){pushUndo();p.out=false;broadcast()}}else sendToHost({type:'back'})};
 window.doLeave=()=>{clearSession();if(G.isHost){pushUndo();delete G.players[G.myId];broadcast()}else sendToHost({type:'leave'})};
 window.doBet=(a,amt)=>{if(G.isHost)processBet(G.myId,a,amt);else sendToHost({type:'bet',action:a,amount:amt})};
+window.confirmEnd=()=>{if(confirm('End the game now and go to final results & settlement? (You can Undo this on the results screen.)'))endGame()};
 window.doRebuy=(amt)=>{if(G.isHost)processRebuy(G.myId,amt);else sendToHost({type:'rebuy',amount:amt})};
 // Step 1: pick re-buy amount (100 or 200 chips).
 window.showRebuyModal=function(){
