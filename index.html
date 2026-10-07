@@ -338,7 +338,7 @@ function say(t){if(!voiceOn||!window.speechSynthesis)return;try{const u=new Spee
 let _vround=null,_vhand=null,_vact=null;
 function voiceAnnounce(){
   if(!voiceOn){return}const h=G.hand;if(!h)return;
-  if(h.handNum!==_vhand){_vhand=h.handNum;_vround=null;_vact=null;say('New hand')}
+  if(h.handNum!==_vhand){const firstObserve=(_vhand===null);_vhand=h.handNum;_vround=null;_vact=null;if(!firstObserve&&h.status==='betting'&&h.round==='preflop')say('New hand')}
   if(h.status==='betting'&&h.round!==_vround){_vround=h.round;if(h.round&&h.round!=='preflop')say(RL[h.round]||h.round)}
   if(h.status==='showdown'&&_vround!=='showdown'){_vround='showdown';say('Showdown')}
   if(h.lastAction&&h.lastAction!==_vact){_vact=h.lastAction;const la=h.lastAction;if(/all-in/i.test(la))say('All in!')}
@@ -1080,7 +1080,7 @@ function rResults(app){
   app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${sumHtml}${exHtml}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
       <button class="btn-g" onclick="shareSummary()" style="width:100%;max-width:300px">📤 Share results</button>
-      ${G.isHost&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()">↩ Undo last change</button>`:''}
+      ${G.isHost?`<button class="btn-o btn-sm" onclick="undo()">↩ Undo last change</button>`:''}
       ${G.isHost?`<button class="btn-o" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
     </div></div></div>`;
