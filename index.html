@@ -946,6 +946,7 @@ function rLobby(app){
         <button class="btn-g" onclick="toggleArrange()" style="width:100%;max-width:300px">✓ Done Arranging</button>`
       :`
         <button class="btn-o" onclick="showInvite()" style="width:100%;max-width:300px">📤 Invite / QR code</button>
+        ${isH?`<div style="display:flex;gap:10px;align-items:center;justify-content:center"><span style="font-size:.8rem;color:var(--dim)">Seats at table</span><button class="btn-o btn-sm" onclick="setSeats(-1)" style="min-width:34px">−</button><b style="min-width:26px;text-align:center;color:var(--gold)">${seatCount()}</b><button class="btn-o btn-sm" onclick="setSeats(1)" style="min-width:34px">＋</button></div>`:''}
         ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
         ${!isH&&G.config?`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.7rem;color:var(--dim)">${claiming?'Claiming…':'Take over as host'}</button>`:''}
         ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Random Draw for Seats</button>`:''}
@@ -994,6 +995,7 @@ function rGame(app){
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn-o btn-sm" onclick="showLedger()">📊 Standings</button>
       <button class="btn-o btn-sm" onclick="showInvite()">📤 Invite</button>
+      ${isH?`<button class="btn-o btn-sm" onclick="setSeats(1)">➕ Add seat (${seatCount()})</button>`:''}
       ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy</button>`:''}
     </div>
   </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
@@ -1249,6 +1251,14 @@ window.showLedger=function(){
   const div=document.createElement('div');div.id='ledmod';div.className='mo';
   div.innerHTML=`<div class="mb"><h3>Standings (live)</h3><div class="settle" style="margin-top:0">${rows}</div><button class="btn-o btn-sm" onclick="document.getElementById('ledmod').remove()">Close</button></div>`;
   document.body.appendChild(div);
+};
+// Host can add/remove seats on the fly (can't shrink below occupied seats; 2–14).
+window.setSeats=function(d){
+  if(!G.isHost||!G.config)return;
+  const occMax=Object.values(G.players).reduce((m,p)=>Math.max(m,p.seat),0);
+  const cur=G.config.maxSeats||10,lo=Math.max(2,occMax),n=Math.min(14,Math.max(lo,cur+d));
+  if(n===cur){toast(d<0?'Can’t remove an occupied seat':'Max 14 seats');return}
+  pushUndo();G.config.maxSeats=n;toast('Table now has '+n+' seats');broadcast();
 };
 
 // On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
