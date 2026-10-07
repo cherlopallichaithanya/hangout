@@ -150,12 +150,13 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
 
-// Per-tab player id (sessionStorage): survives a reload (so a seat resumes) but is unique per
-// browser tab — which also lets you solo-test with several tabs as different players.
+// Persistent per-room player id (localStorage): a returning player reclaims the SAME seat + chips
+// even after fully closing the browser — they just rejoin the room with the same code.
+// (For solo multi-tab testing, use separate browsers / incognito windows so each gets its own id.)
 function stablePlayerId(room){
   const k='hangout_pid_'+room;let id=null;
-  try{id=sessionStorage.getItem(k)}catch(e){}
-  if(!id){id='p_'+Math.random().toString(36).slice(2,10);try{sessionStorage.setItem(k,id)}catch(e){}}
+  try{id=localStorage.getItem(k)}catch(e){}
+  if(!id){id='p_'+Math.random().toString(36).slice(2,10);try{localStorage.setItem(k,id)}catch(e){}}
   return id;
 }
 // Remember the current room/name for THIS tab only, so a refresh auto-rejoins (but a fresh open doesn't).
