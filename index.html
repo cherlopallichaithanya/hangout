@@ -143,7 +143,10 @@ const cv=(r,s)=>RV[r]*10+SV[s], isRed=s=>s==='♥'||s==='♦';
 const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
 // Seats laid out so the NEXT seat (higher number = next to act) sits to the LEFT, i.e. action moves left like real poker.
 const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50+48*Math.cos(a),top:50+44*Math.sin(a)}};
-const PRAISES=['Amazing game! 🔥','Great play! 👏','Wonderful strategy! 🧠','What a poker pro! 🎩','Masterful move! ♠️','Smooth operator! 😎','Ice in the veins! 🧊','Absolute legend! 🏆','Big-brain poker! 🧠','Clinical finish! 🎯','That was slick! ✨','Reading souls tonight! 👀','Shark in the water! 🦈','Chip magnet! 🧲'];
+const PRAISES=['Amazing game! 🔥','Great play! 👏','Wonderful strategy! 🧠','What a poker pro! 🎩','Masterful move! ♠️','Smooth operator! 😎','Ice in the veins! 🧊','Absolute legend! 🏆','Big-brain poker! 🧠','Clinical finish! 🎯','That was slick! ✨','Reading souls tonight! 👀','Shark in the water! 🦈','Chip magnet! 🧲',
+  'Nuvvu thopheyy! 🔥','Nuvvu appe vade ledu! 🚀','Paisa vasool mama! 💰','Garana Moogudu nuvvu! 😎','Moosagalake Moosagadivi nuvvu! 🦊',
+  'Oka sari commit aithe naa maata nene vinanu! 💪','Evadu kodithe dimma tirigi mind block! 🥊','Thaggede le! 🚫','Antha scene ledu! 😏','Idhi naa style mama! 😎','Pakka commercial hit! 🎬','One life, one chance! ⚡','Attack antene ishtam! ⚔️','Scene antha naade! 🎯','Mind block ! 🤯',
+  'Pokiri! 🔫','Businessman! 💼','Magadheera! ⚔️','Baahubali! 👑','Eega! 🪰','Temper! 😤','Khaleja! ⚡','Athadu! 🎯','Gabbar Singh! 🔫','Race Gurram! 🏁'];
 const randPraise=()=>PRAISES[Math.floor(Math.random()*PRAISES.length)];
 
 // ===== STATE =====
