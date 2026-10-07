@@ -132,6 +132,9 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 .qchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
 .qchip{flex:0 0 auto;background:var(--s2);border:1px solid var(--border);border-radius:16px;color:var(--text);font-size:.8rem;padding:6px 11px;white-space:nowrap;cursor:pointer}
 .qchip:active{background:var(--gold-dim);border-color:var(--gold)}
+.avgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;max-height:34vh;overflow-y:auto}
+.avpick.sel{background:var(--gold-dim);border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+.sav{font-size:1rem;line-height:1}
 #chatfeed{position:fixed;left:10px;top:58px;display:flex;flex-direction:column;gap:6px;z-index:45;max-width:74vw;pointer-events:none}
 .chatb{background:rgba(20,21,26,.93);border:1px solid var(--border);border-radius:14px;padding:6px 11px;font-size:.82rem;color:var(--text);box-shadow:0 4px 12px rgba(0,0,0,.35);transition:opacity .6s}
 .chatb b{color:var(--gold)}.chatb.fade{opacity:0}
@@ -160,6 +163,7 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 <button id="quickbomb" onclick="quickThrow('💣')" style="display:none" aria-label="Throw a bomb at the current player">💣</button>
 <button id="socialbtn" onclick="openSocialPanel()" style="display:none" aria-label="Chat and emotes">💬</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 // ===== CONSTANTS =====
 const SEATS=[1,2,3,4,5,6,7,8,9,10],ROUNDS=['preflop','flop','turn','river','showdown'];
@@ -182,6 +186,7 @@ const randPraise=()=>PRAISES[Math.floor(Math.random()*PRAISES.length)];
 let client=null;        // MQTT connection to the public broker
 let joinTimer=null;     // watchdog: if no room state arrives, the room isn't there
 let undoStack=[];       // host-only: state snapshots for multi-level undo
+let _recHand=-1;        // host-only: last hand number recorded into history
 let arrangeMode=false,arrangeSel=null;   // host-only: manual seat arrangement (lobby)
 let hbTimer=null,lastSeen=0,hostGone=false,lastStateStr='';   // host heartbeat + player-side host-loss detection
 let claiming=false,myClaim=null,claimWin=true,claimTimer=null;   // host-takeover arbitration
@@ -237,6 +242,8 @@ function maybeCelebrate(){
 // ===== SOCIAL: chat + emotes (ephemeral peer broadcast; no host needed) =====
 let socialClient=null,socialRoom=null;
 const EMOTES=['💣','🔥','😂','👏','🍺','🌹','💩','👑','🤡','🫡','😎','🥶'];
+const AVATARS=['😀','😎','🤠','🥳','🤑','😈','👑','🦊','🐯','🐼','🦁','🐸','🐷','🦄','🐙','🦈','🐵','🐲','🤖','👽','💀','🤡','🧛','🧙','🎩','🐺','🦅','🐧','🦖','🌟'];
+let myAv='';try{myAv=localStorage.getItem('hg_av')||''}catch(e){}
 function openSocial(room){
   if(!room||window.mqtt===undefined&&typeof mqtt==='undefined')return;
   if(socialClient&&socialRoom===room)return;
@@ -275,7 +282,10 @@ window.openSocialPanel=function(){
   const div=document.createElement('div');div.id='socmod';div.className='socmod';
   div.innerHTML=`<div class="socbar"><div class="socrow"><span style="font-size:.72rem;color:var(--dim);white-space:nowrap">Throw to</span>
       <select id="soctgt"><option value="all">🌐 Everyone</option>${tgt}</select>
-      <button class="embtn" onclick="document.getElementById('socmod').remove()" style="margin-left:auto">✕</button></div>
+      <button class="embtn" onclick="changeAvatar()" title="Change avatar">${myAv||'🙂'}</button>
+      <button class="embtn" id="mutebtn" onclick="toggleMute()" title="Sound effects">${muted?'🔇':'🔊'}</button>
+      <button class="embtn" id="voicebtn" onclick="toggleVoice()" title="Dealer voice">${voiceOn?'🗣️':'🙊'}</button>
+      <button class="embtn" onclick="document.getElementById('socmod').remove()">✕</button></div>
     <div class="emgrid">${ems}</div>
     <div class="qchips">${QUICKCHAT.map((p,i)=>`<button class="qchip" onclick="quickChat(${i})">${esc(p)}</button>`).join('')}</div>
     <div class="socrow"><input id="socmsg" type="text" placeholder="Say something…" maxlength="140" autocomplete="off"><button class="btn-g btn-sm" onclick="chatSend()">Send</button></div></div>`;
@@ -290,10 +300,33 @@ const QUICKCHAT=['Bluff kada! 😏','Fold avvu mama! 🙏','All in po! 🔥','Lu
 window.quickChat=function(i){if(QUICKCHAT[i])sendChat(QUICKCHAT[i])};
 // One-tap throw at whoever's turn it is (or everyone between turns)
 window.quickThrow=function(em){const t=(G.hand&&G.hand.status==='betting'&&G.hand.currentSeat)?G.hand.currentSeat:'all';sendEmote(em,t)};
+window.changeAvatar=function(){
+  const old=document.getElementById('avmod');if(old){old.remove();return}
+  const avs=AVATARS.map(a=>`<button class="embtn avpick${a===myAv?' sel':''}" onclick="pickAvatar('${a}')">${a}</button>`).join('');
+  const div=document.createElement('div');div.id='avmod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Your avatar</h3><div class="avgrid">${avs}</div><button class="btn-o btn-sm" onclick="document.getElementById('avmod').remove()">Close</button></div>`;
+  document.body.appendChild(div);
+};
+window.pickAvatar=function(a){myAv=a;try{localStorage.setItem('hg_av',a)}catch(e){}const m=document.getElementById('avmod');if(m)m.remove();if(G.isHost){const p=G.players[G.myId];if(p){p.av=a;broadcast()}}else sendToHost({type:'avatar',av:a});toast('Avatar updated '+a)};
+
+// ===== SETTINGS (mute FX, dealer voice) =====
+let muted=false,voiceOn=false;
+try{muted=localStorage.getItem('hg_mute')==='1';voiceOn=localStorage.getItem('hg_voice')==='1'}catch(e){}
+window.toggleMute=()=>{muted=!muted;try{localStorage.setItem('hg_mute',muted?'1':'0')}catch(e){}const b=document.getElementById('mutebtn');if(b)b.textContent=muted?'🔇':'🔊';toast(muted?'Sound off 🔇':'Sound on 🔊')};
+window.toggleVoice=()=>{voiceOn=!voiceOn;try{localStorage.setItem('hg_voice',voiceOn?'1':'0')}catch(e){}const b=document.getElementById('voicebtn');if(b)b.textContent=voiceOn?'🗣️':'🙊';toast(voiceOn?'Dealer voice on 🗣️':'Dealer voice off');if(voiceOn)say('Dealer voice on')};
+function say(t){if(!voiceOn||!window.speechSynthesis)return;try{const u=new SpeechSynthesisUtterance(t);u.rate=1;u.pitch=1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+let _vround=null,_vhand=null,_vact=null;
+function voiceAnnounce(){
+  if(!voiceOn){return}const h=G.hand;if(!h)return;
+  if(h.handNum!==_vhand){_vhand=h.handNum;_vround=null;_vact=null;say('New hand')}
+  if(h.status==='betting'&&h.round!==_vround){_vround=h.round;if(h.round&&h.round!=='preflop')say(RL[h.round]||h.round)}
+  if(h.status==='showdown'&&_vround!=='showdown'){_vround='showdown';say('Showdown')}
+  if(h.lastAction&&h.lastAction!==_vact){_vact=h.lastAction;const la=h.lastAction;if(/all-in/i.test(la))say('All in!');else if(/wins|split/i.test(la))say(la.replace(/[🏆🃏🔥💰💪🥊🚫😎🎬🤯🎯💢👑🦊🚀🏁🔫💼⚔️]/g,'').trim())}
+}
 
 // ===== SOUND (Web Audio, synthesized — no external files) =====
 let _ac=null;
-function ac(){try{if(!_ac)_ac=new (window.AudioContext||window.webkitAudioContext)();if(_ac.state==='suspended')_ac.resume()}catch(e){_ac=null}return _ac}
+function ac(){if(muted)return null;try{if(!_ac)_ac=new (window.AudioContext||window.webkitAudioContext)();if(_ac.state==='suspended')_ac.resume()}catch(e){_ac=null}return _ac}
 document.addEventListener('pointerdown',()=>{try{ac()}catch(e){}});   // unlock audio on first tap
 function noiseBuf(dur){const c=_ac;if(!c)return null;const n=Math.floor(c.sampleRate*dur);const b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=Math.random()*2-1;return b}
 function nburst(at,dur,peak,ftype,f0,f1){const c=ac();if(!c)return;const b=noiseBuf(dur);if(!b)return;const t=c.currentTime+(at||0),s=c.createBufferSource();s.buffer=b;let node=s;if(ftype){const f=c.createBiquadFilter();f.type=ftype;f.frequency.setValueAtTime(f0||1000,t);if(f1)f.frequency.exponentialRampToValueAtTime(f1,t+dur);s.connect(f);node=f}const g=c.createGain();g.gain.setValueAtTime(peak||0.3,t);g.gain.exponentialRampToValueAtTime(0.001,t+dur);node.connect(g).connect(c.destination);s.start(t);s.stop(t+dur+0.03)}
@@ -364,6 +397,13 @@ function applyState(d){
 }
 
 function broadcast(){
+  // Record a completed hand into history (host only, once per hand).
+  if(G.isHost&&G.hand&&G.hand.status==='complete'&&G.hand.handNum!==_recHand){
+    _recHand=G.hand.handNum;G.config.history=G.config.history||[];
+    let ws=[];if(G.hand.pots)G.hand.pots.forEach(p=>{if(p.winner)ws=ws.concat(Array.isArray(p.winner)?p.winner:[p.winner])});if(G.hand.winner)ws.push(G.hand.winner);
+    const names=Array.from(new Set(ws)).map(id=>G.players[id]&&G.players[id].name).filter(Boolean);
+    G.config.history.push({n:G.hand.handNum,pot:G.hand.pot||0,w:names});
+  }
   // Host publishes full state, retained so anyone joining later receives it instantly.
   if(client&&client.connected){
     const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};
@@ -381,7 +421,7 @@ function handlePlayerMsg(data,connId){
       const taken=Object.values(G.players).some(p=>p.seat===data.seat&&p.id!==connId);
       if(taken)return;
       pushUndo();
-      G.players[connId]={id:connId,name:data.name,seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
+      G.players[connId]={id:connId,name:data.name,av:data.av||'',seat:data.seat,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};
       // Joining mid-hand: sit out the current hand; they play from the next deal.
       if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(data.seat)){G.hand.folded.push(data.seat);(G.hand.satOut=G.hand.satOut||[]).push(data.seat)}
       toast(data.name+' sat at seat '+data.seat);
@@ -398,6 +438,8 @@ function handlePlayerMsg(data,connId){
     processRebuy(connId,data.amount);
   }else if(data.type==='back'){
     const p=G.players[connId];if(p&&p.out){pushUndo();p.out=false;toast(p.name+' is back in');broadcast()}
+  }else if(data.type==='avatar'){
+    const p=G.players[connId];if(p&&data.av){p.av=data.av;broadcast()}
   }else if(data.type==='host-takeover'){
     if(data.by&&data.by!==G.myId)relinquishHost();   // someone else took over → we step down
   }
@@ -466,7 +508,7 @@ window.undo=function(){
 function createHost(config){
   G.roomId=genCode();
   G.isHost=true;
-  G.config={...config,status:'lobby',expenses:[],hostId:'host'};   // expenses+hostId live in config so they sync automatically
+  G.config={...config,status:'lobby',expenses:[],hostId:'host',history:[]};   // expenses+hostId+history live in config so they sync automatically
   G.myId='host';
   // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
   G.players={'host':{id:'host',name:G.myName,seat:1,chips:config.buyInDollars*config.chipRatio,totalBuyIn:config.buyInDollars,active:true}};
@@ -774,6 +816,7 @@ function render(){
   const sb=document.getElementById('socialbtn');if(sb)sb.style.display=inRoom?'flex':'none';
   const qb=document.getElementById('quickbomb');if(qb)qb.style.display=(inRoom&&G.screen==='game')?'flex':'none';
   if(inRoom)openSocial(G.roomId);else{const sm=document.getElementById('socmod');if(sm)sm.remove()}
+  voiceAnnounce();
   switch(G.screen){
     case'home':return rHome(app);case'join':return rJoin(app);
     case'lobby':return rLobby(app);case'game':return rGame(app);case'results':return rResults(app);
@@ -807,11 +850,12 @@ function rHome(app){
 }
 
 function rJoin(app){
+  let preRoom='';try{preRoom=(new URLSearchParams(location.search).get('room')||'').toUpperCase()}catch(e){}
   app.innerHTML=`<div class="screen active"><div class="center-wrap">
     <div class="suitrow"><span class="suittile blk">♠</span><span class="suittile red">♥</span><span class="suittile red">♦</span><span class="suittile blk">♣</span></div><h1>Join Table</h1>
     <form id="jf" style="display:flex;flex-direction:column;gap:12px;width:100%">
       <div class="fg"><label>Your Name</label><input type="text" id="jname" placeholder="Enter name" maxlength="12" required autocomplete="off"></div>
-      <div class="fg"><label>Room Code</label><input type="text" id="jcode" placeholder="e.g. ABC12" maxlength="5" required autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:1.4rem;font-weight:700;letter-spacing:.15em"></div>
+      <div class="fg"><label>Room Code</label><input type="text" id="jcode" value="${esc(preRoom)}" placeholder="e.g. ABC12" maxlength="5" required autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:1.4rem;font-weight:700;letter-spacing:.15em"></div>
       <button type="submit" class="btn-g" style="width:100%">Join</button>
       <button type="button" class="btn-o" onclick="G.screen='home';render()" style="width:100%">Back</button>
     </form>
@@ -842,7 +886,7 @@ function rLobby(app){
       const[oid,op]=occ;let badge='';
       if(cd?.done&&cd.seating){const s=cd.seating[oid];if(s===1)badge='<span class="sbadge">D</span>';else if(s===2)badge='<span class="sbadge">SB</span>';else if(s===3&&pc>2)badge='<span class="sbadge">BB</span>'}
       if(G.config&&G.config.hostId===oid)badge+='<span class="sbadge" style="background:linear-gradient(145deg,#49e08b,#13a357);color:#04210f">HOST</span>';
-      inner=`<div class="tsi"><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span>${badge}</div>`;
+      inner=`<div class="tsi"><span class="sn">S${sn}</span>${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span>${badge}</div>`;
     }else{
       const canSit=!myP;
       inner=`<div class="tsi ${canSit?'ck':''}" ${canSit?`onclick="showSeatModal(${sn})"`:''}><span class="sn">S${sn}</span><span class="sempty">${canSit?'Sit':'—'}</span></div>`;
@@ -872,6 +916,7 @@ function rLobby(app){
         <div class="arrbanner">${arrangeSel?('Tap a seat to place <b>'+esc(G.players[arrangeSel]?.name||'')+'</b> (swaps if taken)'):'Tap a player, then tap a seat to move or swap them.'}</div>
         <button class="btn-g" onclick="toggleArrange()" style="width:100%;max-width:300px">✓ Done Arranging</button>`
       :`
+        <button class="btn-o" onclick="showInvite()" style="width:100%;max-width:300px">📤 Invite / QR code</button>
         ${myP?`<button class="btn-o btn-sm" onclick="doLeave()">Leave Seat</button>`:''}
         ${!isH&&G.config?`<button class="btn-o btn-sm" onclick="becomeHost()" style="font-size:.7rem;color:var(--dim)">${claiming?'Claiming…':'Take over as host'}</button>`:''}
         ${isH&&pc>=2?`<button class="btn-o" onclick="drawCards()" style="width:100%;max-width:300px">🃏 Random Draw for Seats</button>`:''}
@@ -904,7 +949,7 @@ function rGame(app){
     const click=isSD&&isH?`onclick="toggleWinner('${oid}')"`:(canToggle?`onclick="toggleSitOut(${sn})"`:'');
     const tag=isOut?'<span style="font-size:.46rem;color:var(--dim);font-weight:700">OUT</span>':(isWait?'<span style="font-size:.46rem;color:var(--gold);font-weight:700">NEXT HAND</span>':(isFold?'<span style="font-size:.5rem;color:var(--red)">FOLD</span>':''));
     seats+=`<div class="${cls}" data-seat="${sn}" style="left:${pos.left.toFixed(1)}%;top:${pos.top.toFixed(1)}%">
-      <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}><span class="sn">S${sn}</span><span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
+      <div class="tsi ${isSD?'ck elig':''} ${canToggle?'ck':''} ${isSel?'winsel':''}" ${click}><span class="sn">S${sn}</span>${op.av?'<span class="sav">'+op.av+'</span>':''}<span class="sname">${esc(op.name)}</span><span class="schips">${op.chips}${bet?` <span class="sbet">+${bet}</span>`:''}</span>${badge}${tag}</div></div>`;
   }
   const re=G.config?.reshuffleEvery||0,hnd=h?'Hand #'+h.handNum+(re?' / '+re:''):'';
   app.innerHTML=`<div class="screen active"><div class="gw">
@@ -917,7 +962,11 @@ function rGame(app){
       <div class="felt-potl">Pot</div>
     </div></div>${seats}</div>
     ${h?.lastAction?`<div class="la">${esc(h.lastAction)}</div>`:''}
-    ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<div style="text-align:center"><button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy (low on chips)</button></div>`:''}
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button class="btn-o btn-sm" onclick="showLedger()">📊 Standings</button>
+      <button class="btn-o btn-sm" onclick="showInvite()">📤 Invite</button>
+      ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy</button>`:''}
+    </div>
   </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
   const sl=document.getElementById('rsl'),ni=document.getElementById('ramt');
   if(sl&&ni){sl.oninput=()=>{ni.value=sl.value};ni.oninput=()=>{sl.value=ni.value}}
@@ -978,25 +1027,48 @@ function rResults(app){
   const exHtml=`<div class="settle"><div class="settle-h">Expenses</div>${exs.length?exs.map((e,i)=>{const sn=(e.split||[]).map(id=>G.players[id]?.name).filter(Boolean);const shareTxt=sn.length&&sn.length<Object.keys(G.players).length?('split: '+sn.map(esc).join(', ')):('split '+(sn.length||Object.keys(G.players).length)+' ways');return `<div class="settle-row"><span>${esc(e.desc)} · paid by ${esc(G.players[e.by]?.name||'?')}<br><span style="font-size:.72rem;color:var(--dim)">${shareTxt}</span></span><span><b>$${(+e.amount).toFixed(2)}</b>${G.isHost?` <button onclick="delExpense(${i})" style="background:none;border:none;color:var(--red);font-size:1rem;cursor:pointer;padding:0 2px">✕</button>`:''}</span></div>`}).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">No expenses added</div>`}${G.isHost?`<button class="btn-o btn-sm" onclick="showExpenseModal()" style="margin-top:6px">＋ Add food / expense</button>`:''}</div>`;
   const tx=computeSettlement();
   const settle=`<div class="settle"><div class="settle-h">Settle Up</div>${tx.length?tx.map(t=>`<div class="settle-row"><span>${esc(t.from)} pays ${esc(t.to)}</span><b>$${t.amt.toFixed(2)}</b></div>`).join(''):`<div class="settle-row" style="justify-content:center;color:var(--dim)">All square — no payments needed</div>`}</div>`;
-  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${exHtml}${settle}
+  // Night highlights
+  const hist=G.config.history||[],cr=G.config.chipRatio;
+  let bw=null,bwNet=-1e9;entries.forEach(p=>{const n=p.chips/cr-p.totalBuyIn;if(n>bwNet){bwNet=n;bw=p}});
+  let bp=0;hist.forEach(h=>{if(h.pot>bp)bp=h.pot});
+  const wc={};hist.forEach(h=>(h.w||[]).forEach(n=>wc[n]=(wc[n]||0)+1));let mw=null,mwN=0;Object.keys(wc).forEach(n=>{if(wc[n]>mwN){mwN=wc[n];mw=n}});
+  const sumHtml=`<div class="settle"><div class="settle-h">The Night 🌙</div>
+    <div class="settle-row"><span>🏆 Biggest winner</span><b>${bw&&bwNet>0?esc(bw.name)+' (+$'+bwNet.toFixed(2)+')':'—'}</b></div>
+    <div class="settle-row"><span>💰 Biggest pot</span><b>${bp?bp+' chips':'—'}</b></div>
+    <div class="settle-row"><span>🔥 Most hands won</span><b>${mw?esc(mw)+' ('+mwN+')':'—'}</b></div>
+    <div class="settle-row"><span>🃏 Hands played</span><b>${hist.length}</b></div></div>`;
+  app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${sumHtml}${exHtml}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
+      <button class="btn-g" onclick="shareSummary()" style="width:100%;max-width:300px">📤 Share results</button>
       ${G.isHost&&undoStack.length?`<button class="btn-o btn-sm" onclick="undo()">↩ Undo last change</button>`:''}
-      ${G.isHost?`<button class="btn-g" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
+      ${G.isHost?`<button class="btn-o" onclick="backToLobby()" style="width:100%;max-width:300px">Back to Lobby</button>`:''}
       <button class="btn-o" onclick="doNewGame()" style="width:100%;max-width:300px">New Game</button>
     </div></div></div>`;
 }
+window.shareSummary=function(){
+  const cr=G.config.chipRatio,lines=['🃏 Hangout — final results',''];
+  Object.values(G.players).sort((a,b)=>b.chips-a.chips).forEach(p=>{const net=p.chips/cr-p.totalBuyIn;lines.push((net>=0?'🟢 ':'🔴 ')+p.name+': '+(net>=0?'+':'-')+'$'+Math.abs(net).toFixed(2))});
+  const tx=computeSettlement();if(tx.length){lines.push('','Settle up:');tx.forEach(t=>lines.push('• '+t.from+' → '+t.to+' $'+t.amt.toFixed(2)))}
+  const text=lines.join('\n');
+  if(navigator.share)navigator.share({title:'Hangout results',text}).catch(()=>{});else{try{navigator.clipboard.writeText(text)}catch(e){}toast('Results copied')}
+};
 
 // ===== UI ACTIONS =====
 window.showSeatModal=function(sn){
   const old=document.getElementById('smod');if(old)old.remove();
+  if(!myAv)myAv=AVATARS[Math.floor(Math.random()*AVATARS.length)];
+  const avs=AVATARS.map(a=>`<button class="embtn avpick${a===myAv?' sel':''}" data-av="${a}">${a}</button>`).join('');
   const div=document.createElement('div');div.id='smod';div.className='mo';
-  div.innerHTML=`<div class="mb"><h3>Seat ${sn}</h3><input id="snin" type="text" placeholder="Your name" maxlength="12" value="${esc(G.myName||'')}" autocomplete="off">
+  div.innerHTML=`<div class="mb"><h3>Take seat ${sn}</h3><input id="snin" type="text" placeholder="Your name" maxlength="12" value="${esc(G.myName||'')}" autocomplete="off">
+    <div style="font-size:.72rem;color:var(--dim);text-align:left;width:100%">Pick your avatar</div>
+    <div class="avgrid">${avs}</div>
     <div class="mbs"><button class="btn-o" onclick="document.getElementById('smod').remove()">Cancel</button><button class="btn-g" id="scbtn">Sit Down</button></div></div>`;
   document.body.appendChild(div);
   const inp=document.getElementById('snin');setTimeout(()=>inp?.focus(),50);
-  const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;
-    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(sn)){G.hand.folded.push(sn);(G.hand.satOut=G.hand.satOut||[]).push(sn)}toast(nm+' sat at seat '+sn);broadcast()}
-    else{sendToHost({type:'join',seat:sn,name:nm})}};
+  div.querySelectorAll('.avpick').forEach(b=>b.onclick=()=>{myAv=b.getAttribute('data-av');try{localStorage.setItem('hg_av',myAv)}catch(e){}div.querySelectorAll('.avpick').forEach(x=>x.classList.remove('sel'));b.classList.add('sel')});
+  const go=()=>{const nm=inp.value.trim();if(!nm)return;document.getElementById('smod')?.remove();G.myName=nm;try{localStorage.setItem('hg_av',myAv)}catch(e){}
+    if(G.isHost){pushUndo();G.players[G.myId]={id:G.myId,name:nm,av:myAv,seat:sn,chips:G.config.buyInDollars*G.config.chipRatio,totalBuyIn:G.config.buyInDollars,active:true};if(G.hand&&G.hand.status!=='complete'&&!G.hand.folded.includes(sn)){G.hand.folded.push(sn);(G.hand.satOut=G.hand.satOut||[]).push(sn)}toast(nm+' sat at seat '+sn);broadcast()}
+    else{sendToHost({type:'join',seat:sn,name:nm,av:myAv})}};
   document.getElementById('scbtn').onclick=go;inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
 };
 // Manual seat arrangement (host, lobby only): tap a player, then tap a seat to move/swap. Chips kept.
@@ -1125,11 +1197,37 @@ window.addExpense=(desc,amount,by,split)=>{
 window.delExpense=(i)=>{if(!G.isHost)return;pushUndo();(G.config.expenses||[]).splice(i,1);broadcast()};
 window.doReset=()=>{if(G.isHost&&!confirm('End this table for EVERYONE and start fresh? Chips and the current game will be lost. (To just change seats, use “Arrange Seats Manually” instead.)'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';G.config=null;G.players={};G.hand=null;G.cardDraw=null;render();toast('Table reset')};
 window.doNewGame=()=>{if(!confirm('Leave this table and go to the start screen?'))return;cleanupNet();clearSession();arrangeMode=false;arrangeSel=null;G.screen='home';render()};
+function inviteUrl(){return location.origin+location.pathname+'?room='+encodeURIComponent(G.roomId||'')}
+window.showInvite=function(){
+  const old=document.getElementById('invmod');if(old){old.remove();return}
+  const url=inviteUrl();let qr='';
+  try{if(window.qrcode){const q=qrcode(0,'M');q.addData(url);q.make();qr=q.createImgTag(5,10)}}catch(e){}
+  const div=document.createElement('div');div.id='invmod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Invite players</h3>
+    <div style="text-align:center;font-size:.8rem;color:var(--dim)">Room code</div>
+    <div style="text-align:center;font-size:2rem;font-weight:800;color:var(--gold);letter-spacing:.2em">${esc(G.roomId||'')}</div>
+    <div style="display:flex;justify-content:center;background:#fff;padding:10px;border-radius:12px">${qr||'<span style="color:#333">QR unavailable</span>'}</div>
+    <div class="mbs"><button class="btn-g" onclick="shareInvite()">Share link</button><button class="btn-o" onclick="copyInvite()">Copy</button></div>
+    <button class="btn-o btn-sm" onclick="document.getElementById('invmod').remove()">Close</button></div>`;
+  document.body.appendChild(div);
+};
+window.shareInvite=function(){const url=inviteUrl(),text='Join my poker game on Hangout! Room '+(G.roomId||'');if(navigator.share)navigator.share({title:'Hangout',text,url}).catch(()=>{});else copyInvite()};
+window.copyInvite=function(){const url=inviteUrl();try{navigator.clipboard.writeText(url)}catch(e){}toast('Invite link copied')};
+window.showLedger=function(){
+  const old=document.getElementById('ledmod');if(old){old.remove();return}
+  const cr=G.config.chipRatio;
+  const rows=Object.values(G.players).sort((a,b)=>b.chips-a.chips).map(p=>{const fd=p.chips/cr,net=fd-p.totalBuyIn,up=net>=0;return `<div class="settle-row"><span>${esc(p.av||'')} ${esc(p.name)}</span><span><b>${p.chips}</b> · <span style="color:${up?'var(--green)':'var(--red)'};font-weight:700">${up?'+':'-'}$${Math.abs(net).toFixed(2)}</span></span></div>`}).join('');
+  const div=document.createElement('div');div.id='ledmod';div.className='mo';
+  div.innerHTML=`<div class="mb"><h3>Standings (live)</h3><div class="settle" style="margin-top:0">${rows}</div><button class="btn-o btn-sm" onclick="document.getElementById('ledmod').remove()">Close</button></div>`;
+  document.body.appendChild(div);
+};
 
 // On refresh, auto-rejoin the room this tab was in (players only — a host's authoritative state can't be restored).
 (function(){
   let s=null;try{s=JSON.parse(sessionStorage.getItem('hangout_sess')||'null')}catch(e){}
   if(s&&s.room&&s.name){G.myName=s.name;if(s.host)resumeHost(s.room,s.name);else joinRoom(s.room);return}
+  let pre=null;try{pre=new URLSearchParams(location.search).get('room')}catch(e){}
+  if(pre)G.screen='join';           // opened via an invite link/QR → go to Join with the code prefilled
   render();
 })();
 // Warn before an accidental refresh/close during an active hand.
