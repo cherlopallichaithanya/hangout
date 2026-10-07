@@ -142,7 +142,7 @@ button{transition:transform .12s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,op
 .socbar{width:100%;max-width:460px;background:linear-gradient(160deg,var(--surface),var(--bg));border:1px solid var(--border);border-top:2px solid var(--gold);border-radius:16px 16px 0 0;padding:12px;display:flex;flex-direction:column;gap:10px;box-shadow:0 -12px 44px rgba(0,0,0,.55)}
 .socrow{display:flex;gap:8px;align-items:center}
 .socrow select,.socrow input{flex:1;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;color:var(--bright);font-size:.95rem;padding:9px 10px}
-.emgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.emgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;max-height:34vh;overflow-y:auto;padding:2px}
 .embtn{background:var(--s2);border:1px solid var(--border);border-radius:12px;font-size:1.5rem;padding:8px 0;cursor:pointer;transition:transform .08s}
 .embtn:active{transform:scale(.86);background:var(--gold-dim)}
 .emfloat{position:fixed;font-size:2rem;z-index:280;pointer-events:none;animation:emfloat 1.6s ease-out forwards}
@@ -241,8 +241,9 @@ function maybeCelebrate(){
 
 // ===== SOCIAL: chat + emotes (ephemeral peer broadcast; no host needed) =====
 let socialClient=null,socialRoom=null;
-const EMOTES=['💣','🔥','😂','👏','🍺','🌹','💩','👑','🤡','🫡','😎','🥶'];
-const AVATARS=['😀','😎','🤠','🥳','🤑','😈','👑','🦊','🐯','🐼','🦁','🐸','🐷','🦄','🐙','🦈','🐵','🐲','🤖','👽','💀','🤡','🧛','🧙','🎩','🐺','🦅','🐧','🦖','🌟'];
+// Big WhatsApp-style throw set (first few map to special sounds; rest use a pop).
+const EMOTES='💣 🔥 👏 😂 🤡 🍺 🌹 👑 💩 😎 🥶 🫡 😀 😃 😄 😁 😆 😅 🤣 🙂 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😋 😛 😜 🤪 🤑 🤗 🤭 🤫 🤔 🤨 😐 😑 😶 😏 😒 🙄 😬 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 😵 🤯 🥳 🤓 🧐 🙁 😮 😯 😲 😳 🥺 😦 😨 😰 😥 😢 😭 😱 😖 😞 😤 😡 😠 🤬 👿 💀 ☠️ 👻 👽 🤖 👍 👎 👊 ✊ 🤛 🤜 🙌 👐 🤝 🙏 ✌️ 🤞 🤟 🤘 👌 🤌 👈 👉 👆 👇 ☝️ ✋ 🖐️ 🖖 👋 🤙 💪 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💯 💢 💥 ✨ ⭐ 🌟 🎉 🎊 🎈 🎁 🏆 🥇 🎲 🎰 💰 💵 🃏 🦁 🐯 🐸 🙈 🙉 🙊 🦄 🐲 🦈 🦊 🐶 🐱 🍻 🍷 🥂 🍸 🍕 🍔 🍟 🌭 ⚡ 💤 💨'.split(' ');
+const AVATARS='😀 😎 🤠 🥳 🤑 😈 👑 🦊 🐯 🐼 🦁 🐸 🐷 🦄 🐙 🦈 🐵 🐲 🤖 👽 💀 🤡 🧛 🧙 🎩 🐺 🦅 🐧 🦖 🌟 😺 🐶 🐱 🐰 🐻 🐨 🐮 🐔 🦉 🦇 🐢 🐍 🦋 🐝 🦜 🦩 🦓 🐴 🦒 🐘 🐳 🐬 🦭 🐊 🦕 🦸 🦹 🧟 🧚 🧜 🥷 👻 👹 👺'.split(' ');
 let myAv='';try{myAv=localStorage.getItem('hg_av')||''}catch(e){}
 function openSocial(room){
   if(!room||window.mqtt===undefined&&typeof mqtt==='undefined')return;
@@ -310,10 +311,12 @@ window.changeAvatar=function(){
 window.pickAvatar=function(a){myAv=a;try{localStorage.setItem('hg_av',a)}catch(e){}const m=document.getElementById('avmod');if(m)m.remove();if(G.isHost){const p=G.players[G.myId];if(p){p.av=a;broadcast()}}else sendToHost({type:'avatar',av:a});toast('Avatar updated '+a)};
 
 // ===== SETTINGS (mute FX, dealer voice) =====
-let muted=false,voiceOn=false;
-try{muted=localStorage.getItem('hg_mute')==='1';voiceOn=localStorage.getItem('hg_voice')==='1'}catch(e){}
-window.toggleMute=()=>{muted=!muted;try{localStorage.setItem('hg_mute',muted?'1':'0')}catch(e){}const b=document.getElementById('mutebtn');if(b)b.textContent=muted?'🔇':'🔊';toast(muted?'Sound off 🔇':'Sound on 🔊')};
-window.toggleVoice=()=>{voiceOn=!voiceOn;try{localStorage.setItem('hg_voice',voiceOn?'1':'0')}catch(e){}const b=document.getElementById('voicebtn');if(b)b.textContent=voiceOn?'🗣️':'🙊';toast(voiceOn?'Dealer voice on 🗣️':'Dealer voice off');if(voiceOn)say('Dealer voice on')};
+let muted=false,voiceOn=false,_mset=false,_vset=false;
+try{const m=localStorage.getItem('hg_mute');if(m!=null){muted=m==='1';_mset=true}const v=localStorage.getItem('hg_voice');if(v!=null){voiceOn=v==='1';_vset=true}}catch(e){}
+// Default: HOST has sound + dealer voice ON; other players OFF — unless they've toggled it themselves.
+function applyAudioDefaults(isHost){if(!_mset)muted=!isHost;if(!_vset)voiceOn=!!isHost}
+window.toggleMute=()=>{muted=!muted;_mset=true;try{localStorage.setItem('hg_mute',muted?'1':'0')}catch(e){}const b=document.getElementById('mutebtn');if(b)b.textContent=muted?'🔇':'🔊';toast(muted?'Sound off 🔇':'Sound on 🔊')};
+window.toggleVoice=()=>{voiceOn=!voiceOn;_vset=true;try{localStorage.setItem('hg_voice',voiceOn?'1':'0')}catch(e){}const b=document.getElementById('voicebtn');if(b)b.textContent=voiceOn?'🗣️':'🙊';toast(voiceOn?'Dealer voice on 🗣️':'Dealer voice off');if(voiceOn)say('Dealer voice on')};
 function say(t){if(!voiceOn||!window.speechSynthesis)return;try{const u=new SpeechSynthesisUtterance(t);u.rate=1;u.pitch=1;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
 let _vround=null,_vhand=null,_vact=null;
 function voiceAnnounce(){
@@ -507,7 +510,7 @@ window.undo=function(){
 
 function createHost(config){
   G.roomId=genCode();
-  G.isHost=true;
+  G.isHost=true;applyAudioDefaults(true);
   G.config={...config,status:'lobby',expenses:[],hostId:'host',history:[]};   // expenses+hostId+history live in config so they sync automatically
   G.myId='host';
   // Host auto-sits seat 1; show the table + room code immediately (don't wait on the network).
@@ -544,7 +547,7 @@ function hostConnect(announce){
 
 // Restore an in-progress table after the host refreshes/reopens the tab, using the retained state.
 function resumeHost(room,name){
-  G.roomId=room;G.isHost=true;G.myId='host';G.myName=name;
+  G.roomId=room;G.isHost=true;G.myId='host';G.myName=name;applyAudioDefaults(true);
   let restored=false;
   client=mqttConnect(c=>{c.subscribe(topicState(room),{qos:1});c.subscribe(topicAction(room),{qos:1})});
   client.on('message',(topic,payload)=>{
@@ -568,7 +571,7 @@ function resumeHost(room,name){
 
 function joinRoom(code){
   G.roomId=code.toUpperCase();
-  G.isHost=false;
+  G.isHost=false;applyAudioDefaults(false);
   G.myId=stablePlayerId(G.roomId);
   saveSession();
   G.screen='lobby';render();
