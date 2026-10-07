@@ -995,7 +995,7 @@ function rGame(app){
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn-o btn-sm" onclick="showLedger()">📊 Standings</button>
       <button class="btn-o btn-sm" onclick="showInvite()">📤 Invite</button>
-      ${isH?`<button class="btn-o btn-sm" onclick="setSeats(1)">➕ Add seat (${seatCount()})</button>`:''}
+      ${isH?`<span style="display:inline-flex;gap:6px;align-items:center"><button class="btn-o btn-sm" onclick="setSeats(-1)">➖</button><span style="font-size:.78rem;color:var(--dim)">Seats ${seatCount()}</span><button class="btn-o btn-sm" onclick="setSeats(1)">➕</button></span>`:''}
       ${(me&&me.chips<50&&(!h||h.status==='complete'))?`<button class="btn-o btn-sm" onclick="showRebuyModal()">Re-buy</button>`:''}
     </div>
   </div><div class="ap">${rActionPanel(h,me,isH,pl)}</div></div>`;
