@@ -340,7 +340,7 @@ function voiceAnnounce(){
   if(!voiceOn){return}const h=G.hand;if(!h)return;
   if(h.handNum!==_vhand){const firstObserve=(_vhand===null);_vhand=h.handNum;_vround=null;_vact=null;if(!firstObserve&&h.status==='betting'&&h.round==='preflop')say('New hand')}
   if(h.status==='betting'&&h.round!==_vround){_vround=h.round;if(h.round&&h.round!=='preflop')say(RL[h.round]||h.round)}
-  if(h.status==='showdown'&&_vround!=='showdown'){_vround='showdown';say('Showdown')}
+  if(h.status==='showdown'&&_vround!=='showdown'){_vround='showdown'}   /* no showdown/winner voice */
   if(h.lastAction&&h.lastAction!==_vact){_vact=h.lastAction;const la=h.lastAction;if(/all-in/i.test(la))say('All in!')}
 }
 
