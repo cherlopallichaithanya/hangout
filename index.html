@@ -1075,8 +1075,8 @@ function rResults(app){
   const wc={};hist.forEach(h=>(h.w||[]).forEach(n=>wc[n]=(wc[n]||0)+1));let mw=null,mwN=0;Object.keys(wc).forEach(n=>{if(wc[n]>mwN){mwN=wc[n];mw=n}});
   const sumHtml=`<div class="settle"><div class="settle-h">The Night 🌙</div>
     <div class="settle-row"><span>🏆 Biggest winner</span><b>${bw&&bwNet>0?esc(bw)+' (+$'+bwNet.toFixed(2)+')':'—'}</b></div>
-    <div class="settle-row"><span>💰 Biggest pot</span><b>${bp?bp+' chips'+(bpw?' — '+esc(bpw):''):'—'}</b></div>
-    <div class="settle-row"><span>🔥 Most hands won</span><b>${mw?esc(mw)+' ('+mwN+')':'—'}</b></div>
+    <div class="settle-row"><span>💰 Biggest pot</span><b>${bp?(bpw?esc(bpw)+' ('+bp+' chips)':bp+' chips'):'—'}</b></div>
+    <div class="settle-row"><span>🔥 Most hands won</span><b>${mw?esc(mw)+' ('+mwN+' wins)':'—'}</b></div>
     <div class="settle-row"><span>🃏 Hands played</span><b>${hist.length}</b></div></div>`;
   app.innerHTML=`<div class="screen active"><div class="rw"><h1>Game Over</h1>${rows}${sumHtml}${exHtml}${settle}
     <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:8px">
