@@ -107,6 +107,14 @@ button{transition:transform .1s cubic-bezier(.4,0,.2,1),box-shadow .18s ease,opa
 .suitrow{display:flex;gap:10px;justify-content:center}
 .suittile{width:44px;height:58px;border-radius:9px;background:linear-gradient(155deg,#fff,#e9e9ee);display:flex;align-items:center;justify-content:center;font-size:1.85rem;line-height:1;box-shadow:0 5px 12px rgba(0,0,0,.45),0 1px 2px rgba(0,0,0,.3),inset 0 1px 0 #fff,inset 0 -2px 4px rgba(0,0,0,.05);border:1px solid rgba(0,0,0,.1)}
 .suittile.red{color:#d11e2b}.suittile.blk{color:#15151a}
+.confp{position:fixed;top:-16px;width:9px;height:14px;border-radius:2px;z-index:300;pointer-events:none;animation:conf linear forwards}
+@keyframes conf{to{transform:translateY(108vh) rotate(760deg);opacity:.85}}
+.celebrate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:290;pointer-events:none}
+.celebcard{background:linear-gradient(160deg,rgba(26,27,32,.97),rgba(10,10,13,.97));border:1px solid var(--gold);border-radius:18px;padding:22px 30px;text-align:center;box-shadow:0 22px 64px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.08);animation:celebpop .42s cubic-bezier(.2,1.5,.4,1)}
+.celebrate.out{opacity:0;transition:opacity .6s}
+.celebwin{font-size:1.5rem;font-weight:800;color:var(--gold);margin-bottom:5px;text-shadow:0 2px 10px rgba(212,175,87,.4)}
+.celebmsg{font-size:1.05rem;font-weight:600;color:var(--bright)}
+@keyframes celebpop{from{transform:scale(.55);opacity:0}to{transform:scale(1);opacity:1}}
 @media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}.schips{font-size:.62rem}.felt-pot{font-size:2.3rem}}
 </style>
 </head>
@@ -124,6 +132,8 @@ const cv=(r,s)=>RV[r]*10+SV[s], isRed=s=>s==='♥'||s==='♦';
 const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
 // Seats laid out so the NEXT seat (higher number = next to act) sits to the LEFT, i.e. action moves left like real poker.
 const seatPos=(i,t)=>{const a=Math.PI/2+Math.PI*2*i/t;return{left:50+48*Math.cos(a),top:50+44*Math.sin(a)}};
+const PRAISES=['Amazing game! 🔥','Great play! 👏','Wonderful strategy! 🧠','What a poker pro! 🎩','Masterful move! ♠️','Smooth operator! 😎','Ice in the veins! 🧊','Absolute legend! 🏆','Big-brain poker! 🧠','Clinical finish! 🎯','That was slick! ✨','Reading souls tonight! 👀','Shark in the water! 🦈','Chip magnet! 🧲'];
+const randPraise=()=>PRAISES[Math.floor(Math.random()*PRAISES.length)];
 
 // ===== STATE =====
 let client=null;        // MQTT connection to the public broker
@@ -146,6 +156,34 @@ let G={
 // ===== TOAST =====
 let tt;
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),2500)}
+
+// ===== CELEBRATION (winner praise + confetti) =====
+let lastCelebHand=-1;
+function confetti(){
+  const cols=['#d4af57','#ef4747','#2ec27e','#4aa3ff','#f1d892','#ff7ac0','#ffd93b'];
+  for(let i=0;i<90;i++){const d=document.createElement('div');d.className='confp';
+    d.style.left=(Math.random()*100).toFixed(1)+'vw';
+    d.style.background=cols[Math.floor(Math.random()*cols.length)];
+    d.style.animationDelay=(Math.random()*0.35).toFixed(2)+'s';
+    d.style.animationDuration=(1.8+Math.random()*1.3).toFixed(2)+'s';
+    if(Math.random()<0.5)d.style.borderRadius='50%';
+    document.body.appendChild(d);setTimeout(()=>d.remove(),3400);}
+}
+function celebrate(name,praise){
+  confetti();
+  const old=document.getElementById('celeb');if(old)old.remove();
+  const d=document.createElement('div');d.id='celeb';d.className='celebrate';
+  d.innerHTML=`<div class="celebcard"><div class="celebwin">🏆 ${esc(name)}</div><div class="celebmsg">${esc(praise)}</div></div>`;
+  document.body.appendChild(d);
+  setTimeout(()=>d.classList.add('out'),2000);setTimeout(()=>d.remove(),2700);
+}
+function maybeCelebrate(){
+  const h=G.hand;
+  if(h&&h.status==='complete'&&h.praise&&h.handNum!==lastCelebHand){
+    lastCelebHand=h.handNum;const w=G.players[h.winner];
+    celebrate(w?w.name:'Winner',h.praise);
+  }
+}
 
 // ===== NETWORKING (public MQTT broker — no account, works across any network) =====
 function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<5;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
@@ -179,7 +217,7 @@ function applyState(d){
   if(str===lastStateStr){if(wasGone)render();return} // heartbeat with no change → don't disrupt the UI
   lastStateStr=str;
   G.config=d.config;G.players=d.players;G.hand=d.hand;G.cardDraw=d.cardDraw;G.roomId=d.roomId;
-  syncScreen();render();
+  syncScreen();render();maybeCelebrate();
 }
 
 function broadcast(){
@@ -188,7 +226,7 @@ function broadcast(){
     const msg={type:'state',config:G.config,players:G.players,hand:G.hand,cardDraw:G.cardDraw,roomId:G.roomId};
     try{client.publish(topicState(G.roomId),JSON.stringify(msg),{qos:1,retain:true})}catch(e){}
   }
-  syncScreen();render();
+  syncScreen();render();maybeCelebrate();
 }
 
 function handlePlayerMsg(data,connId){
@@ -449,7 +487,7 @@ function processBet(playerId,action,raiseAmt){
   if(notFolded.length<=1){
     const w=notFolded[0],pot=h.pot+Object.values(h.bets).reduce((s,v)=>s+v,0);
     if(w)w.chips+=pot;
-    h.status='complete';h.pot=pot;h.bets={};h.winner=w?.id;h.lastAction=(w?.name||'?')+' wins '+pot+' (all folded)';
+    h.status='complete';h.pot=pot;h.bets={};h.winner=w?.id;h.praise=randPraise();h.lastAction=(w?.name||'?')+' wins '+pot+' (all folded)';
     toast(h.lastAction);broadcast();return;
   }
 
@@ -514,7 +552,7 @@ function resolveAutoPots(h){
       h.potIdx++;
     }else break;
   }
-  if(h.potIdx>=h.pots.length)h.status='complete';
+  if(h.potIdx>=h.pots.length){h.status='complete';h.praise=randPraise()}
 }
 // Showdown: host taps the winning seat(s) for the current pot, then awards. Tapping 2+ splits/chops it.
 function toggleWinner(pid){
@@ -775,7 +813,7 @@ function rActionPanel(h,me,isH,pl){
   if(h?.status==='betting'){
     const cp=playerBySeat(h.currentSeat);
     if(isH)return`<div class="hp"><div class="hm">Waiting for ${cp?esc(cp.name):'next player'}… If they stepped away, act for them:</div>
-      <div class="ab"><button class="btn-fold" onclick="hostAct('fold')">Fold</button><button class="btn-check" onclick="hostAct('checkcall')">Check / Call</button><button class="btn-o" onclick="hostSitOut()">Sit out</button></div></div>`;
+      <div class="ab"><button class="btn-fold" onclick="hostAct('fold')">Fold them</button><button class="btn-check" onclick="hostAct('checkcall')">Check/Call</button><button class="btn-o" onclick="hostSitOut()">Sit out</button></div></div>`;
     return`<div class="hm">Waiting for ${cp?esc(cp.name):'next player'}…</div>`;
   }
   if(!isH&&h?.status==='showdown'){const pots=h.pots||[];return`<div class="hm">Showdown — host is awarding ${pots.length>1?`pot ${(h.potIdx||0)+1}/${pots.length}`:'the pot'}…</div>`}
