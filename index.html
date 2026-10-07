@@ -103,6 +103,9 @@ button{transition:transform .08s ease,box-shadow .15s ease,opacity .15s ease,bac
 .settle-row{display:flex;justify-content:space-between;align-items:center;font-size:.9rem;color:var(--text);gap:10px}
 .settle-row b{color:var(--green);white-space:nowrap}
 .arrbanner{font-size:.82rem;color:var(--bright);background:var(--gold-dim);border:1px solid var(--gold);border-radius:var(--r);padding:9px 12px;text-align:center;max-width:320px;line-height:1.35}
+.suitrow{display:flex;gap:9px;justify-content:center}
+.suittile{width:42px;height:56px;border-radius:8px;background:linear-gradient(160deg,#fff,#ececef);display:flex;align-items:center;justify-content:center;font-size:1.8rem;line-height:1;box-shadow:0 4px 10px rgba(0,0,0,.4),inset 0 1px 0 #fff;border:1px solid rgba(0,0,0,.12)}
+.suittile.red{color:#d11e2b}.suittile.blk{color:#15151a}
 @media(min-width:600px){.ptc{max-width:560px}.tsi{min-width:68px;padding:8px 6px}.sname{font-size:.72rem;max-width:62px}}
 </style>
 </head>
@@ -570,7 +573,7 @@ function render(){
 
 function rHome(app){
   app.innerHTML=`<div class="screen active"><div class="center-wrap">
-    <div style="font-size:2.2rem;letter-spacing:4px"><span style="color:var(--bright)">♠</span><span style="color:var(--red)">♥</span><span style="color:var(--red)">♦</span><span style="color:var(--bright)">♣</span></div><h1>Hangout</h1>
+    <div class="suitrow"><span class="suittile blk">♠</span><span class="suittile red">♥</span><span class="suittile red">♦</span><span class="suittile blk">♣</span></div><h1>Hangout</h1>
     <form id="sf" style="display:flex;flex-direction:column;gap:12px;width:100%">
       <div class="fg"><label>Your Name</label><input type="text" id="iname" placeholder="Enter name" maxlength="12" required autocomplete="off"></div>
       <div class="fg"><label>Buy-in ($)</label><input type="number" id="ibi" value="20" min="1"></div>
@@ -596,7 +599,7 @@ function rHome(app){
 
 function rJoin(app){
   app.innerHTML=`<div class="screen active"><div class="center-wrap">
-    <div style="font-size:2.2rem;letter-spacing:4px"><span style="color:var(--bright)">♠</span><span style="color:var(--red)">♥</span><span style="color:var(--red)">♦</span><span style="color:var(--bright)">♣</span></div><h1>Join Table</h1>
+    <div class="suitrow"><span class="suittile blk">♠</span><span class="suittile red">♥</span><span class="suittile red">♦</span><span class="suittile blk">♣</span></div><h1>Join Table</h1>
     <form id="jf" style="display:flex;flex-direction:column;gap:12px;width:100%">
       <div class="fg"><label>Your Name</label><input type="text" id="jname" placeholder="Enter name" maxlength="12" required autocomplete="off"></div>
       <div class="fg"><label>Room Code</label><input type="text" id="jcode" placeholder="e.g. ABC12" maxlength="5" required autocomplete="off" style="text-transform:uppercase;text-align:center;font-size:1.4rem;font-weight:700;letter-spacing:.15em"></div>
